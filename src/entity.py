@@ -39,7 +39,7 @@ class Boton:
         self.color_actual = color_base
 
         # --- OPTIMIZACIÓN: Carga e inicialización única de texto ---
-        self.fuente = pygame.font.Font(Config.FUENTE_PRINCIPAL, 24)
+        self.fuente = pygame.font.Font(Config.FUENTE_PRINCIPAL, 28)
         self.texto_surf = self.fuente.render(self.texto, True, Config.NEGRO)
         self.texto_rect = self.texto_surf.get_rect(center=self.rect.center)
 
@@ -76,7 +76,7 @@ class Boton:
         self.resaltado_teclado = valor
 
     def dibujar(self, superficie):
-        seleccionado = self.hover or self.resaltado_teclado
+        seleccionado = self.resaltado_teclado
 
         if seleccionado and self.tex_selected:
             rect_tex = self.tex_selected.get_rect(center=self.rect.center)
@@ -128,6 +128,7 @@ class Jugador:
         self.cuerda_elegida = None
         self.x = 0
         self.y = 0
+        self.angulo_actual = 0.0
         
         # Asignar personaje
         self.personaje = personaje if personaje else Config.PERSONAJES[(id - 1) % 8]
@@ -137,9 +138,9 @@ class Jugador:
         self.nombre = f"{tipo_jugador} ({self.personaje})"
         
         # --- OPTIMIZACIÓN: Cargar fuentes fijas al inicializar ---
-        # Nombre un poco más grande (antes 12) y coloreado según el personaje
-        self.fuente_name = pygame.font.Font(Config.FUENTE_PRINCIPAL, 18)
-        self.fuente_cuerda = pygame.font.Font(Config.FUENTE_PRINCIPAL, 14)
+        # Nombre un poco más grande y coloreado según el personaje
+        self.fuente_name = pygame.font.Font(Config.FUENTE_PRINCIPAL, 24)
+        self.fuente_cuerda = pygame.font.Font(Config.FUENTE_PRINCIPAL, 18)
         color_nombre = self.COLORES_NOMBRE.get(self.personaje, Config.BLANCO)
         self.txt_n = self.fuente_name.render(self.nombre, True, color_nombre)
         self.txt_n_sombra = self.fuente_name.render(self.nombre, True, Config.NEGRO)
@@ -312,11 +313,7 @@ class Jugador:
         superficie.blit(self.txt_n_sombra, rect_n_sombra)
         superficie.blit(self.txt_n, rect_n)
         
-        if self.cuerda_elegida is not None:
-            txt_c = self.fuente_cuerda.render(f"C{self.cuerda_elegida + 1}", True, Config.BLANCO)
-            pygame.draw.circle(superficie, Config.NEGRO, (self.x + Config.CHAR_ANCHO // 2, self.y + Config.CHAR_ALTO // 2), 15)
-            txt_rect = txt_c.get_rect(center=(self.x + Config.CHAR_ANCHO // 2, self.y + Config.CHAR_ALTO // 2))
-            superficie.blit(txt_c, txt_rect)
+
 
     def dibujar_flecha(self, superficie):
         if not self.vivo: return
@@ -330,16 +327,10 @@ class Jugador:
 
 
 class Cuerda:
-    # --- CORRECCIÓN DE BUG DE RENDIMIENTO ---
-    # Antes, cada instancia de Cuerda volvía a leer y reescalar desde disco
-    # sprite_rope.png, sprite_fish.png y sprite_monster.png. Como generar_ronda()
-    # crea varias Cuerdas nuevas en CADA ronda (y cada partida), esto significaba
-    # I/O y reescalado redundante todo el tiempo, para exactamente las mismas
-    # imágenes. Ahora se cachean una sola vez a nivel de clase y se comparten
-    # entre todas las instancias.
     _cache_sprite_rope = None
     _cache_sprite_fish = None
-    _cache_sprite_monster = None
+    _cache_sprite_monster1 = None
+    _cache_sprite_monster2 = None
 
     def __init__(self, id, x, y_inicio):
         self.id = id
@@ -354,7 +345,7 @@ class Cuerda:
         self.atrapado = False  
         
         # --- OPTIMIZACIÓN: Cargar fuentes una sola vez ---
-        self.fuente_n = pygame.font.Font(Config.FUENTE_PRINCIPAL, 14)
+        self.fuente_n = pygame.font.Font(Config.FUENTE_PRINCIPAL, 22)
         self.txt_id = self.fuente_n.render(str(self.id), True, Config.BLANCO)
 
         if Cuerda._cache_sprite_rope is None:
@@ -362,65 +353,136 @@ class Cuerda:
                 Cuerda._cache_sprite_rope = pygame.image.load(str(Config.SPRITE_ROPE)).convert_alpha()
             except Exception as e:
                 print(f"Error cargando sprite de cuerda: {e}")
-                # Superficie de reserva para no interrumpir la partida si falta el asset
                 Cuerda._cache_sprite_rope = pygame.Surface((10, 10), pygame.SRCALPHA)
                 Cuerda._cache_sprite_rope.fill(Config.MADERA_CUERDA)
         self.sprite_rope = Cuerda._cache_sprite_rope
         self.ancho_sprite = self.sprite_rope.get_width()
 
-        # La recompensa revelada en la cuerda usa el sprite "_fished"
-        # (el pez/monstruo ya atrapado), no el de nado libre.
+        # Carga de sprites reales pescados ("_fished") manteniendo dimensiones naturales
         if Cuerda._cache_sprite_fish is None:
             try:
-                sprite_fish = pygame.image.load(str(Config.SPRITE_FISH_FISHED)).convert_alpha()
-                Cuerda._cache_sprite_fish = pygame.transform.scale(sprite_fish, (Config.SPRITE_CREATURE_SIZE, Config.SPRITE_CREATURE_SIZE))
+                Cuerda._cache_sprite_fish = pygame.image.load(str(Config.SPRITE_FISH_FISHED)).convert_alpha()
             except Exception as e:
                 print(f"Error cargando sprite de pez: {e}")
-                Cuerda._cache_sprite_fish = pygame.Surface((Config.SPRITE_CREATURE_SIZE, Config.SPRITE_CREATURE_SIZE), pygame.SRCALPHA)
+                Cuerda._cache_sprite_fish = pygame.Surface((64, 64), pygame.SRCALPHA)
 
-        if Cuerda._cache_sprite_monster is None:
+        if Cuerda._cache_sprite_monster1 is None:
             try:
-                sprite_monster = pygame.image.load(str(Config.SPRITE_MONSTER_FISHED)).convert_alpha()
-                Cuerda._cache_sprite_monster = pygame.transform.scale(sprite_monster, (Config.SPRITE_CREATURE_SIZE, Config.SPRITE_CREATURE_SIZE))
+                raw_m1 = pygame.image.load(str(Config.SPRITE_MONSTER_FISHED)).convert_alpha()
+                w1, h1 = raw_m1.get_size()
+                Cuerda._cache_sprite_monster1 = pygame.transform.smoothscale(raw_m1, (int(w1 * 1.35), int(h1 * 1.0)))
             except Exception as e:
-                print(f"Error cargando sprite de monstruo: {e}")
-                Cuerda._cache_sprite_monster = pygame.Surface((Config.SPRITE_CREATURE_SIZE, Config.SPRITE_CREATURE_SIZE), pygame.SRCALPHA)
+                print(f"Error cargando sprite de monstruo 1: {e}")
+                Cuerda._cache_sprite_monster1 = pygame.Surface((48, 140), pygame.SRCALPHA)
 
-        # Redimensionado de criaturas a SPRITE_CREATURE_SIZE (72x72) para mejor visualización
+        if Cuerda._cache_sprite_monster2 is None:
+            try:
+                raw_m2 = pygame.image.load(str(Config.SPRITE_MONSTER2_FISHED)).convert_alpha()
+                w2, h2 = raw_m2.get_size()
+                Cuerda._cache_sprite_monster2 = pygame.transform.smoothscale(raw_m2, (int(w2 * 1.20), int(h2 * 0.85)))
+            except Exception as e:
+                print(f"Error cargando sprite de monstruo 2: {e}")
+                Cuerda._cache_sprite_monster2 = pygame.Surface((70, 96), pygame.SRCALPHA)
+
         self.sprite_fish = Cuerda._cache_sprite_fish
-        self.sprite_monster = Cuerda._cache_sprite_monster
+        self.sprite_monster1 = Cuerda._cache_sprite_monster1
+        self.sprite_monster2 = Cuerda._cache_sprite_monster2
 
     def dibujar(self, superficie, revelado_total, en_proceso=False, resaltada=False):
-        # 0. RESALTADO AL PASAR/APUNTAR EL MOUSE (selección disponible)
-        if resaltada and self.ocupada_por is None:
-            halo = pygame.Surface((80, 80), pygame.SRCALPHA)
-            radio = 34 + int(math.sin(pygame.time.get_ticks() * 0.006) * 4)
-            pygame.draw.circle(halo, (255, 215, 0, 90), (40, 40), radio)
-            superficie.blit(halo, (self.x - 40, self.y_fin - 40))
-
-        # 1. CALCULAR LARGO DINÁMICO DE LA CUERDA
         largo_actual = int(self.y_fin - self.y_inicio)
-        
+
+        # 0. RESALTADO AL PASAR/APUNTAR EL MOUSE (Flecha animada + Viga translúcida sin círculo)
+        if resaltada and self.ocupada_por is None:
+            guel_surf = pygame.Surface((32, max(1, largo_actual + 16)), pygame.SRCALPHA)
+            alpha_glow = 85 + int(math.sin(pygame.time.get_ticks() * 0.008) * 35)
+            pygame.draw.rect(guel_surf, (255, 215, 0, alpha_glow), (0, 0, 32, max(1, largo_actual + 16)), border_radius=6)
+            superficie.blit(guel_surf, (self.x - 16, self.y_inicio - 8))
+
+            bamboleo_arrow = math.sin(pygame.time.get_ticks() * 0.01) * 4
+            y_base_arrow = self.y_inicio - 16 + bamboleo_arrow
+            puntos_flecha = [
+                (self.x, int(y_base_arrow + 12)),
+                (self.x - 9, int(y_base_arrow)),
+                (self.x + 9, int(y_base_arrow))
+            ]
+            pygame.draw.polygon(superficie, Config.AMARILLO, puntos_flecha)
+            pygame.draw.polygon(superficie, Config.NEGRO, puntos_flecha, width=2)
+
+        # 1. DIBUJAR CUERDA CURVEADA EN 3D SOBRE EL SALVAVIDAS (USANDO SPRITE_ROPE)
         if largo_actual > 0:
-            grosor_deseado = 40
-            cuerda_estirada = pygame.transform.scale(self.sprite_rope, (grosor_deseado, largo_actual))
-            pos_x = self.x - (grosor_deseado // 2)
-            superficie.blit(cuerda_estirada, (pos_x, self.y_inicio))
+            grosor = 32  # ANCHO de la cuerda en píxeles (Modificar para ajustar grosor)
+            cx = Config.SALV_X + Config.SALV_ANCHO // 2
+            
+            # Punto A: Piso interior del salvavidas (nace más arriba cerca del piso interior)
+            x_in = int(cx + (self.x - cx) * 0.44)
+            y_in = Config.SALV_Y + int(Config.SALV_ALTO * 0.50)  # ALTURA INICIAL (0.32 para que nazca más arriba)
+            
+            # Punto B: Borde frontal exterior del salvavidas
+            x_out = self.x
+            y_out = self.y_inicio
+            
+            # Punto de Control para la curva Bézier sobre el cojín
+            x_ctrl = (x_in + x_out) // 2
+            y_ctrl = y_in - 10
+            
+            # Número de divisiones/tramos de la curva
+            num_pasos = 25  # Cantidad de segmentos en los que se divide la curva
+            puntos_curva = []
+            for i in range(num_pasos + 1):
+                t = i / num_pasos
+                inv_t = 1.0 - t
+                px = inv_t * inv_t * x_in + 2 * inv_t * t * x_ctrl + t * t * x_out
+                py = inv_t * inv_t * y_in + 2 * inv_t * t * y_ctrl + t * t * y_out
+                puntos_curva.append((px, py))
+            
+            # A) Tramo curvo superior usando segmentos continuos de cuerda texturizada sin bordes oscuros
+            w_cr, h_cr = self.sprite_rope.get_size()
+            rope_clean = self.sprite_rope.subsurface((0, 4, w_cr, max(1, h_cr - 8)))
+            
+            for i in range(len(puntos_curva) - 1):
+                p1 = puntos_curva[i]
+                p2 = puntos_curva[i + 1]
+                dx = p2[0] - p1[0]
+                dy = p2[1] - p1[1]
+                dist = max(1, int(math.hypot(dx, dy)))
+                ang = math.degrees(math.atan2(dy, dx)) - 90
+                
+                # LARGO DE CADA TRAMO: (dist + 4). Usando sprite recortado limpio sin rayas horizontales.
+                surf_seg = pygame.transform.scale(rope_clean, (grosor, dist + 4))
+                surf_seg_rot = pygame.transform.rotate(surf_seg, -ang)
+                rect_seg = surf_seg_rot.get_rect(center=((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2))
+                superficie.blit(surf_seg_rot, rect_seg)
 
-        # 2. DIBUJAR EL ID DE LA CUERDA (Eliminado por pedido del usuario)
-        # superficie.blit(self.txt_id, (self.x - 5, self.y_fin - 35))
+            # B) Tramo vertical colgante recto (solapado 10px hacia arriba para ELIMINAR la separación en el borde)
+            y_start_vert = y_out - 10
+            largo_vert = int(self.y_fin - y_start_vert)
+            if largo_vert > 0:
+                cuerda_vert = pygame.transform.scale(self.sprite_rope, (grosor, largo_vert))
+                superficie.blit(cuerda_vert, (x_out - grosor // 2, y_start_vert))
 
-        # 3. REVELAR RECOMPENSAS (Redimensionados y centrados a 72x72)
-        cerca_de_superficie = self.y_fin <= Config.NIVEL_AGUA + 30
-        if revelado_total or (en_proceso and cerca_de_superficie) or self.atrapado:
-            sprite_c = self.sprite_fish if self.contenido == "Pez Bueno" else self.sprite_monster
-            # Centrar la criatura de 72x72 px exactamente sobre la punta de la cuerda
-            superficie.blit(sprite_c, (self.x - Config.SPRITE_CREATURE_SIZE // 2, self.y_fin - Config.SPRITE_CREATURE_SIZE // 2))
+        # 2. REVELAR RECOMPENSAS PESCADAS (Visibles de forma clara e inmediata al pescar)
+        debe_dibujar = False
+        if self.contenido == "Pez Bueno":
+            if en_proceso or self.atrapado:
+                sprite_c = self.sprite_fish
+                debe_dibujar = True
+        else:
+            # Los monstruos SOLO se muestran cuando un jugador los pesca en vivo, NO en la revelación final automática
+            if en_proceso or self.atrapado:
+                sprite_c = self.sprite_monster2 if self.contenido in ("Monstruo 2", "Monstruo_2") else self.sprite_monster1
+                debe_dibujar = True
+
+        if debe_dibujar:
+            cw = sprite_c.get_width()
+            ch = sprite_c.get_height()
+            # Desplazar el Pez Bueno 6px a la derecha para alinearse perfectamente con el nudo y cuerda
+            off_x = 12 if self.contenido == "Pez Bueno" else 0
+            y_item = max(Config.NIVEL_AGUA + 40, self.y_fin)
+            superficie.blit(sprite_c, (self.x - cw // 2 + off_x, y_item - ch // 2))
 
     def contiene_punto(self, pos_mouse, umbral_x=30):
         """Determina si una posición del mouse cae sobre el área clicable de esta cuerda."""
         mx, my = pos_mouse
-        # Rango vertical extendido de interacción
         if not (self.y_inicio - 20 <= my <= self.y_fin + 40):
             return False
         return abs(self.x - mx) <= umbral_x
@@ -428,26 +490,27 @@ class Cuerda:
 
 class CriaturaAmbiental:
     """
-    Representa una criatura marina del fondo (peces, monstruos, etc.)
-    que utiliza los sprites reales orientados a su dirección de nado
-    (sprite_..._left / sprite_..._right), con tinte opcional y nado autónomo.
+    Representa una criatura marina del fondo (peces, monstruo 1, monstruo 2, etc.)
+    que utiliza los sprites reales manteniendo sus proporciones naturales
+    de aspecto y nado autónomo.
     """
-    def __init__(self, ruta_izquierda=None, ruta_derecha=None, es_pez=False):
+    def __init__(self, ruta_izquierda=None, ruta_derecha=None, es_pez=False, escala_factor=1.0):
         self.ruta_izquierda = ruta_izquierda
         self.ruta_derecha = ruta_derecha
         self.es_pez = es_pez
+        self.escala_factor = escala_factor
         self.sprite_izq_original = None
         self.sprite_der_original = None
 
         if ruta_izquierda and os.path.exists(ruta_izquierda):
             try:
-                self.sprite_izq_original = pygame.image.load(ruta_izquierda).convert_alpha()
+                self.sprite_izq_original = pygame.image.load(str(ruta_izquierda)).convert_alpha()
             except Exception as e:
                 print(f"Error cargando sprite ambiental {ruta_izquierda}: {e}")
 
         if ruta_derecha and os.path.exists(ruta_derecha):
             try:
-                self.sprite_der_original = pygame.image.load(ruta_derecha).convert_alpha()
+                self.sprite_der_original = pygame.image.load(str(ruta_derecha)).convert_alpha()
             except Exception as e:
                 print(f"Error cargando sprite ambiental {ruta_derecha}: {e}")
 
@@ -459,12 +522,43 @@ class CriaturaAmbiental:
         # 1. Dirección de nado
         self.direccion = random.choice([1, -1])
         
-        # 2. Dimensiones
-        self.ancho = random.randint(30, 65)
-        self.alto = random.randint(20, 45)
-        
+        # 2. Elegir el sprite ya orientado según la dirección real de nado
+        if self.direccion == 1:
+            sprite_base = self.sprite_der_original or self.sprite_izq_original
+        else:
+            sprite_base = self.sprite_izq_original or self.sprite_der_original
+
+        if sprite_base:
+            w_orig = sprite_base.get_width()
+            h_orig = sprite_base.get_height()
+            
+            # Mantener la proporción de aspecto natural original del sprite
+            factor = random.uniform(0.85, 1.15) * self.escala_factor
+            self.ancho = int(w_orig * factor)
+            self.alto = int(h_orig * factor)
+
+            self.sprite = pygame.transform.scale(sprite_base, (self.ancho, self.alto))
+
+            # Aplicar tinte para dar variedad de colores solo a los peces
+            if self.es_pez:
+                color_tinte = random.choice([
+                    (255, 255, 255, 255), # Original
+                    (255, 130, 130, 255), # Rojo
+                    (130, 255, 130, 255), # Verde
+                    (255, 220, 100, 255), # Dorado
+                    (130, 190, 255, 255), # Celeste
+                    (230, 130, 255, 255)  # Violeta
+                ])
+                tinte_surf = pygame.Surface((self.ancho, self.alto), pygame.SRCALPHA)
+                tinte_surf.fill(color_tinte)
+                self.sprite.blit(tinte_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        else:
+            self.ancho = 50
+            self.alto = 30
+            self.sprite = None
+
         # 3. Velocidad
-        self.velocidad = random.uniform(0.8, 2.5)
+        self.velocidad = random.uniform(0.8, 2.2)
         
         # 4. Posición vertical (siempre bajo el agua)
         self.y = random.randint(Config.NIVEL_AGUA + 20, Config.ALTO - self.alto - 60)
@@ -474,32 +568,6 @@ class CriaturaAmbiental:
             self.x = -self.ancho - random.randint(10, 300)
         else:
             self.x = Config.ANCHO + random.randint(10, 300)
-            
-        # 6. Elegir el sprite ya orientado según la dirección real de nado
-        # (direccion 1 = nada hacia la derecha, -1 = nada hacia la izquierda)
-        if self.direccion == 1:
-            sprite_base = self.sprite_der_original or self.sprite_izq_original
-        else:
-            sprite_base = self.sprite_izq_original or self.sprite_der_original
-
-        if sprite_base:
-            self.sprite = pygame.transform.scale(sprite_base, (self.ancho, self.alto))
-
-            # Aplicar tinte para dar variedad de colores solo a los peces
-            if self.es_pez:
-                color_tinte = random.choice([
-                    (255, 255, 255, 255), # Original
-                    (255, 120, 120, 255), # Rojo
-                    (120, 255, 120, 255), # Verde
-                    (255, 220, 100, 255), # Dorado
-                    (120, 180, 255, 255), # Celeste
-                    (220, 120, 255, 255)  # Violeta
-                ])
-                tinte_surf = pygame.Surface((self.ancho, self.alto), pygame.SRCALPHA)
-                tinte_surf.fill(color_tinte)
-                self.sprite.blit(tinte_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-        else:
-            self.sprite = None
 
     def actualizar(self):
         self.x += self.direccion * self.velocidad
