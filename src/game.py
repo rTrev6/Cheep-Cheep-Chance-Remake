@@ -27,26 +27,67 @@ class ManejadorJuego:
         self.mostrar_debug_fps = False
         
         # --- FUENTES EN MEMORIA ---
-        self.fuente_titulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 38)
-        self.fuente_pausa = pygame.font.Font(Config.FUENTE_PRINCIPAL, 40)
-        self.fuente_subtitulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 20)
-        self.fuente_ui = pygame.font.Font(Config.FUENTE_PRINCIPAL, 16)
-        self.fuente_fps = pygame.font.Font(Config.FUENTE_PRINCIPAL, 14)
-        # Fuente más grande para el panel lateral de jugadores (rondas, selección, etc.)
-        self.fuente_panel = pygame.font.Font(Config.FUENTE_PRINCIPAL, 21)
+        self.fuente_titulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 44)
+        self.fuente_pausa = pygame.font.Font(Config.FUENTE_PRINCIPAL, 48)
+        self.fuente_subtitulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 24)
+        self.fuente_ui = pygame.font.Font(Config.FUENTE_PRINCIPAL, 20)
+        self.fuente_fps = pygame.font.Font(Config.FUENTE_PRINCIPAL, 18)
+        # Fuente más grande para el panel lateral y banner HUD de partida
+        self.fuente_panel = pygame.font.Font(Config.FUENTE_PRINCIPAL, 24)
+        self.fuente_hud_banner = pygame.font.Font(Config.FUENTE_PRINCIPAL, 28)
+        self.fuente_fases_grandes = pygame.font.Font(Config.FUENTE_PRINCIPAL, 34)
         
         # --- CARGAR SONIDOS SINTETIZADOS RETRO Y MÚSICA DE FONDO ---
         self.cargar_sonidos()
         self.reproducir_musica()
         
-        # --- CARGAR FONDO DE PANTALLA DE MAR ---
+        # --- CARGAR FONDOS DE PANTALLA DUALES (SUPERFICIE Y SUBMARINO) ---
         try:
-            self.bg_image = pygame.image.load(str(Config.SPRITE_BACKGROUND)).convert()
-            self.bg_image = pygame.transform.scale(self.bg_image, (Config.ANCHO, Config.ALTO))
+            raw_top = pygame.image.load(str(Config.SPRITE_BACKGROUND_TOP)).convert()
+            self.bg_image_top = pygame.transform.scale(raw_top, (Config.ANCHO, Config.NIVEL_AGUA))
         except Exception as e:
-            print(f"Error cargando fondo de mar: {e}")
-            self.bg_image = pygame.Surface((Config.ANCHO, Config.ALTO))
-            self.bg_image.fill(Config.CELESTE_CIELO)
+            print(f"Error cargando fondo superior: {e}")
+            self.bg_image_top = pygame.Surface((Config.ANCHO, Config.NIVEL_AGUA))
+            self.bg_image_top.fill(Config.CELESTE_CIELO)
+
+        try:
+            alto_bottom = Config.ALTO - Config.NIVEL_AGUA
+            raw_bot = pygame.image.load(str(Config.SPRITE_BACKGROUND_BOTTOM)).convert()
+            self.bg_image_bottom = pygame.transform.scale(raw_bot, (Config.ANCHO, alto_bottom))
+        except Exception as e:
+            print(f"Error cargando fondo inferior: {e}")
+            self.bg_image_bottom = pygame.Surface((Config.ANCHO, Config.ALTO - Config.NIVEL_AGUA))
+            self.bg_image_bottom.fill(Config.AZUL_MAR)
+
+        # --- CARGAR TEXTURA PERSONALIZADA DE PLATAFORMA ---
+        self.sprite_platform = None
+        path_plat = Config.SPRITE_PLATFORM
+        if not path_plat.exists() and Config.RUTA_IMAGENES.exists():
+            for f in Config.RUTA_IMAGENES.iterdir():
+                if f.is_file() and f.name.lower() in ("platform_texture.png", "plataforma.png", "salvavidas.png"):
+                    path_plat = f
+                    break
+        if path_plat.exists():
+            try:
+                img_p = pygame.image.load(str(path_plat)).convert_alpha()
+                self.sprite_platform = pygame.transform.scale(img_p, (Config.SALV_ANCHO, Config.SALV_ALTO))
+            except Exception as e:
+                print(f"Error cargando textura de plataforma: {e}")
+
+        # --- CARGAR TEXTURA DE BORDE DE PLATAFORMA (border_texture.png) ---
+        self.sprite_border_texture = None
+        path_border = Config.SPRITE_BORDER_TEXTURE
+        if not path_border.exists() and Config.RUTA_IMAGENES.exists():
+            for f in Config.RUTA_IMAGENES.iterdir():
+                if f.is_file() and f.name.lower() == "border_texture.png":
+                    path_border = f
+                    break
+        if path_border.exists():
+            try:
+                img_b = pygame.image.load(str(path_border)).convert_alpha()
+                self.sprite_border_texture = pygame.transform.scale(img_b, (Config.SALV_ANCHO, 30))
+            except Exception as e:
+                print(f"Error cargando textura de borde: {e}")
 
         # --- CARGAR FONDO ANIMADO GIF (STARS) ---
         self.frames_stars = self.cargar_gif_animado(str(Config.RUTA_IMAGENES / "stars.gif"))
@@ -91,6 +132,37 @@ class ManejadorJuego:
                 except Exception as e:
                     print(f"Error cargando sprite de selección {nombre_char}: {e}")
 
+        # --- CARGAR IMÁGENES DE CONTROLES (ctrl_*.png) PARA LA PANTALLA DE INSTRUCCIONES ---
+        self.img_ctrl_wasd = None
+        self.img_ctrl_arrow = None
+        self.img_ctrl_mouse = None
+        try:
+            p_wasd = Config.RUTA_IMAGENES / "ctrl_wasd.png"
+            if p_wasd.exists():
+                raw = pygame.image.load(str(p_wasd)).convert_alpha()
+                ancho = int(raw.get_width() * (85 / raw.get_height()))
+                self.img_ctrl_wasd = pygame.transform.scale(raw, (ancho, 85))
+        except Exception as e:
+            print(f"Error cargando ctrl_wasd.png: {e}")
+
+        try:
+            p_arrow = Config.RUTA_IMAGENES / "ctrl_arrow.png"
+            if p_arrow.exists():
+                raw = pygame.image.load(str(p_arrow)).convert_alpha()
+                ancho = int(raw.get_width() * (85 / raw.get_height()))
+                self.img_ctrl_arrow = pygame.transform.scale(raw, (ancho, 85))
+        except Exception as e:
+            print(f"Error cargando ctrl_arrow.png: {e}")
+
+        try:
+            p_mouse = Config.RUTA_IMAGENES / "ctrl_mouse.png"
+            if p_mouse.exists():
+                raw = pygame.image.load(str(p_mouse)).convert_alpha()
+                ancho = int(raw.get_width() * (95 / raw.get_height()))
+                self.img_ctrl_mouse = pygame.transform.scale(raw, (ancho, 95))
+        except Exception as e:
+            print(f"Error cargando ctrl_mouse.png: {e}")
+
         # --- CAPA DE PROFUNDIDAD DEL AGUA ---
         alto_agua = Config.ALTO - Config.NIVEL_AGUA
         self.tinte_agua = pygame.Surface((Config.ANCHO, alto_agua), pygame.SRCALPHA)
@@ -102,10 +174,12 @@ class ManejadorJuego:
             
         # --- CRIATURAS MARINAS EN EL FONDO ---
         self.criaturas = []
-        for _ in range(4):
+        for _ in range(8):
             self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_FISH_LEFT), str(Config.SPRITE_FISH_RIGHT), es_pez=True))
-        for _ in range(2):
-            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER2_LEFT), str(Config.SPRITE_MONSTER2_RIGHT), es_pez=False))
+        for _ in range(4):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER_LEFT), str(Config.SPRITE_MONSTER_RIGHT), es_pez=False, escala_factor=1.0))
+        for _ in range(4):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER2_LEFT), str(Config.SPRITE_MONSTER2_RIGHT), es_pez=False, escala_factor=1.0))
             
         # --- BURBUJAS Y ALGAS ---
         self.burbujas = [[random.randint(10, Config.ANCHO - 10), random.randint(Config.NIVEL_AGUA, Config.ALTO), random.uniform(0.5, 1.5)] for _ in range(12)]
@@ -113,9 +187,9 @@ class ManejadorJuego:
         self.algas_x = [80, 220, 380, 540, 700, 860, 1020, 1180]
 
         # --- BOTONES DINÁMICAMENTE CENTRADOS ---
-        btn_w = 300
-        btn_h = 50
-        cx = (Config.ANCHO - btn_w) // 2 # 490 en 1280
+        btn_w = 340
+        btn_h = 52
+        cx = (Config.ANCHO - btn_w) // 2
         
         # --- BOTONES: MENÚ PRINCIPAL ---
         self.btn_jugar = Boton(cx, 260, btn_w, btn_h, "JUGAR", Config.VERDE, Config.VERDE_REMANSO)
@@ -138,14 +212,12 @@ class ManejadorJuego:
         self.btn_cant_4 = Boton(cx, 400, btn_w, btn_h, "4 JUGADORES", Config.VERDE, Config.VERDE_REMANSO)
         self.btn_cant_volver = Boton(cx, 490, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
         
-        # --- BOTONES: PANTALLA DE OPCIONES ---
-        self.btn_toggle_musica = Boton(cx, 130, btn_w, btn_h, "MUSICA: SI" if Config.musica_activa else "MUSICA: NO", Config.VERDE, Config.VERDE_REMANSO)
-        self.btn_toggle_sfx = Boton(cx, 195, btn_w, btn_h, "SFX: SI" if Config.sfx_activo else "SFX: NO", Config.VERDE, Config.VERDE_REMANSO)
-        # --- SLIDERS: VOLUMEN DE MÚSICA Y EFECTOS ---
-        self.slider_musica = Slider(cx, 300, btn_w, 14, Config.volumen_musica, "VOLUMEN MUSICA")
-        self.slider_sfx = Slider(cx, 360, btn_w, 14, Config.volumen_sfx, "VOLUMEN EFECTOS")
-        self.btn_reset_scores = Boton(cx, 410, btn_w, btn_h, "RESETEAR MARCADOR", Config.ROJO, Config.ROJO_OSCURO)
-        self.btn_volver = Boton(cx, 610, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
+        # --- BOTONES Y SLIDERS: PANTALLA DE OPCIONES ---
+        self.btn_toggle_musica = Boton(cx, 160, btn_w, btn_h, "MUSICA: SI" if Config.musica_activa else "MUSICA: NO", Config.VERDE, Config.VERDE_REMANSO)
+        self.slider_musica = Slider(cx, 250, btn_w, 16, Config.volumen_musica, "VOLUMEN MUSICA")
+        self.btn_toggle_sfx = Boton(cx, 325, btn_w, btn_h, "SFX: SI" if Config.sfx_activo else "SFX: NO", Config.VERDE, Config.VERDE_REMANSO)
+        self.slider_sfx = Slider(cx, 415, btn_w, 16, Config.volumen_sfx, "VOLUMEN EFECTOS")
+        self.btn_volver = Boton(cx, 530, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
         
         # --- BOTONES: PAUSA ---
         self.btn_reanudar = Boton(cx, 280, btn_w, btn_h, "REANUDAR", Config.VERDE, Config.VERDE_REMANSO)
@@ -161,11 +233,12 @@ class ManejadorJuego:
         self.indice_revelacion_actual = 0
         self.sub_estado_animacion = "CAMINANDO"  
         self.tiempo_inicio_sub_estado = 0
-        self.duracion_animacion_jalon = 1500  
+        self.duracion_animacion_jalon = 3800  # Animación lenta y dramática de 3.8s para máximo suspenso
         self.duracion_subida_pez = 1200       
-        self.duracion_caida_jugador = 1500    
+        self.duracion_caida_jugador = 2000    
         self.x_original_jugador = 0
         self.y_original_jugador = 0
+        self.angulo_original_jugador = 0.0
         self.y_al_soltar = 0  
         self.cuerdas_reveladas_indices = set()
         self.sonido_ataque_reproducido = False
@@ -188,6 +261,7 @@ class ManejadorJuego:
         self.victorias_j2 = 0
         self.duelo_finalizado = False
         self.esperando_confirmacion_set = False
+        self.siguiente_set_muerte_subita = False
 
         # --- SELECCIÓN DE PERSONAJES ---
         self.cantidad_humanos = 1
@@ -211,7 +285,10 @@ class ManejadorJuego:
 
         # --- NAVEGACIÓN POR TECLADO EN MENÚS CON BOTONES (mano indicadora) ---
         self.indice_menu_actual = 0
+        self.modo_entrada = "TECLADO"  # "TECLADO" o "MOUSE" (evita que el mouse inmóvil interfiera)
         self._ultimo_estado_menu_check = self.estado
+        self.mensaje_mute_tiempo = 0
+        self.mensaje_mute_texto = ""
 
     # --- CARGAR GIF CON PILLOW ---
     def cargar_gif_animado(self, ruta_gif):
@@ -445,13 +522,13 @@ class ManejadorJuego:
         # --- SFX reales (assets/sounds) ---
         self.snd_click = self._cargar_sfx_real("sfx_menu_option.mp3")
         self.snd_seleccion = self._cargar_sfx_real("sfx_select.mp3")
-        self.snd_alerta = self._cargar_sfx_real("sfx_hurry.oga", volumen=0.5)
-        self.snd_victoria = self._cargar_sfx_real("sfx_victory.oga")
-        self.snd_derrota = self._cargar_sfx_real("sfx_lose.oga")
+        self.snd_alerta = self._cargar_sfx_real("sfx_hurry.mp3", volumen=0.5)
+        self.snd_victoria = self._cargar_sfx_real("sfx_victory.mp3")
+        self.snd_derrota = self._cargar_sfx_real("sfx_lose.mp3")
         self.snd_pausa = self._cargar_sfx_real("sfx_pause.mp3")
         self.snd_reanudar = self._cargar_sfx_real("sfx_unpause.mp3")
-        self.snd_salir = self._cargar_sfx_real("sfx_exit_game.oga")
-        self.snd_kamek = self._cargar_sfx_real("sfx_kamek.mp3")
+        self.snd_salir = self._cargar_sfx_real("sfx_exit_game.mp3")
+        self.snd_kamek = None
 
         # --- Sin archivo real equivalente: se mantienen sintetizados ---
         self.snd_pez = self.generar_sonido_sintetico(950, 0.15, "triangle", volumen=0.08)
@@ -482,20 +559,46 @@ class ManejadorJuego:
 
     def aplicar_volumen_musica(self):
         """Reaplica el volumen de la música actual según Config.volumen_musica."""
-        pygame.mixer.music.set_volume(Config.volumen_musica)
+        mult = 0.45 if self._pista_actual in ("game", "duel") else 1.0
+        pygame.mixer.music.set_volume(Config.volumen_musica * mult)
 
     def reproducir_sonido(self, sonido):
         if Config.sfx_activo and sonido:
             sonido.play()
+
+    def toggle_silencio_global(self):
+        """Alterna el silencio global (MUTE / UNMUTE) para Música y SFX desde cualquier pantalla con F1."""
+        estaba_activo = Config.musica_activa or Config.sfx_activo
+        nuevo_estado = not estaba_activo
+        
+        Config.musica_activa = nuevo_estado
+        Config.sfx_activo = nuevo_estado
+
+        if hasattr(self, 'btn_toggle_musica') and self.btn_toggle_musica:
+            self.btn_toggle_musica.definir_texto("MUSICA: SI" if Config.musica_activa else "MUSICA: NO")
+        if hasattr(self, 'btn_toggle_sfx') and self.btn_toggle_sfx:
+            self.btn_toggle_sfx.definir_texto("SFX: SI" if Config.sfx_activo else "SFX: NO")
+
+        if Config.musica_activa:
+            self.reproducir_sonido(self.snd_click)
+            self._pista_actual = None
+            pista = self._pista_para_estado_actual()
+            if self.estado not in ("FIN_JUEGO",):
+                self.reproducir_musica(pista)
+        else:
+            self.detener_musica()
+
+        self.mensaje_mute_tiempo = pygame.time.get_ticks()
+        self.mensaje_mute_texto = "SONIDO: SILENCIADO (MUTE)" if not nuevo_estado else "SONIDO: ACTIVADO"
 
     def reproducir_musica(self, pista="menu"):
         """Reproduce la pista de música real indicada ('menu', 'game' o 'duel')."""
         if not Config.musica_activa:
             return
         archivos_musica = {
-            "menu": "music_menu.oga",
-            "game": "music_game.oga",
-            "duel": "music_duel.oga",
+            "menu": "music_menu.mp3",
+            "game": "music_game.mp3",
+            "duel": "music_duel.mp3",
         }
         if pista not in archivos_musica:
             return
@@ -504,7 +607,8 @@ class ManejadorJuego:
         ruta = Config.RUTA_SONIDOS / archivos_musica[pista]
         try:
             pygame.mixer.music.load(str(ruta))
-            pygame.mixer.music.set_volume(Config.volumen_musica)
+            mult = 0.45 if pista in ("game", "duel") else 1.0
+            pygame.mixer.music.set_volume(Config.volumen_musica * mult)
             pygame.mixer.music.play(loops=-1)
             self._pista_actual = pista
         except Exception as e:
@@ -513,6 +617,20 @@ class ManejadorJuego:
     def detener_musica(self):
         pygame.mixer.music.stop()
         self._pista_actual = None
+
+    def salir_del_juego(self):
+        """Reproduce sfx_exit_game.mp3 por completo antes de cerrar el juego y volver al Launcher."""
+        self.detener_musica()
+        if Config.sfx_activo and self.snd_salir:
+            try:
+                canal = self.snd_salir.play()
+                duracion_ms = int(self.snd_salir.get_length() * 1000)
+                tiempo_inicio = pygame.time.get_ticks()
+                while canal and canal.get_busy() and (pygame.time.get_ticks() - tiempo_inicio < min(duracion_ms + 100, 3000)):
+                    pygame.time.wait(20)
+            except Exception as e:
+                print(f"Error reproduciendo sfx_exit_game: {e}")
+        self.ejecutando = False
 
     def _pista_para_estado_actual(self):
         """Determina qué pista de música corresponde al estado de juego actual."""
@@ -542,7 +660,27 @@ class ManejadorJuego:
             j_primero = self.jugadores_en_orden_revelacion[0]
             self.x_original_jugador = j_primero.x
             self.y_original_jugador = j_primero.y
+            self.angulo_original_jugador = j_primero.angulo_actual
             self.y_al_soltar = 0
+
+    def obtener_posicion_en_anillo(self, angulo):
+        """Devuelve las coordenadas (x, y) del sprite de un jugador sobre el anillo salvavidas
+        correspondiente al ángulo especificado (en radianes)."""
+        cx = Config.SALV_X + Config.SALV_ANCHO // 2
+        cy = Config.SALV_Y + Config.SALV_ALTO // 2
+        rx = Config.SALV_ANCHO // 2 - 25
+        ry = Config.SALV_ALTO // 2 - 18
+        
+        pos_x = cx + rx * math.cos(angulo) - Config.CHAR_ANCHO // 2
+        pos_y = cy + ry * math.sin(angulo) - (Config.CHAR_ALTO - 6)
+        return pos_x, pos_y
+
+    def obtener_angulo_cuerda(self, x_cuerda):
+        """Devuelve el ángulo en la elipse frontal (borde inferior) correspondiente a la posición X de una cuerda."""
+        cx = Config.SALV_X + Config.SALV_ANCHO // 2
+        rx = Config.SALV_ANCHO // 2 - 25
+        diff_x = max(-1.0, min(1.0, (x_cuerda - cx) / rx))
+        return math.acos(diff_x)
 
     def obtener_y_elipse(self, x, obtener_borde_inferior=True):
         cx = Config.SALV_X + Config.SALV_ANCHO // 2
@@ -558,7 +696,9 @@ class ManejadorJuego:
         num_jugadores = len(jugadores_vivos)
         num_cuerdas = 2 if muerte_subita else num_jugadores * 2
         
-        destinos = ["Pez Bueno"] * (1 if muerte_subita else num_jugadores) + ["Monstruo"] * (1 if muerte_subita else num_jugadores)
+        cant_monstruos = 1 if muerte_subita else num_jugadores
+        monstruos = [random.choice(["Monstruo 1", "Monstruo 2"]) for _ in range(cant_monstruos)]
+        destinos = ["Pez Bueno"] * (1 if muerte_subita else num_jugadores) + monstruos
         random.shuffle(destinos)
         
         inicio_x = Config.SALV_X + 30
@@ -575,16 +715,21 @@ class ManejadorJuego:
             c.y_fin = self.altura_reposo_cuerda
             self.cuerdas.append(c)
             
-        # Se distribuye a cada jugador en una franja propia y del mismo ancho
-        # dentro de la plataforma, centrándolo dentro de esa franja. Así,
-        # sin importar cuántos jugadores haya (hasta 8), cada uno cuenta con
-        # más espacio propio que el ancho de su sprite y no se solapan entre sí.
-        space_j = Config.SALV_ANCHO // num_jugadores if num_jugadores > 0 else 0
+        # Distribución circular de los personajes a lo largo del arco trasero del salvavidas (estilo Mario Party)
+        if num_jugadores == 1:
+            angulos_inicio = [3 * math.pi / 2]
+        else:
+            ang_inicio = math.pi + 0.35
+            ang_fin = 2 * math.pi - 0.35
+            paso = (ang_fin - ang_inicio) / (num_jugadores - 1)
+            angulos_inicio = [ang_inicio + idx * paso for idx in range(num_jugadores)]
+
         for idx, j in enumerate(jugadores_vivos):
-            centro_franja = Config.SALV_X + idx * space_j + space_j // 2
-            j.x = centro_franja - Config.CHAR_ANCHO // 2
-            y_curvo_pies = self.obtener_y_elipse(j.x + Config.CHAR_ANCHO // 2, obtener_borde_inferior=False)
-            j.y = y_curvo_pies - (Config.CHAR_ALTO - 5)
+            ang = angulos_inicio[idx]
+            j.angulo_actual = ang
+            px, py = self.obtener_posicion_en_anillo(ang)
+            j.x = px
+            j.y = py
             j.cuerda_elegida = None
 
     def obtener_grupo_botones_actual(self):
@@ -595,7 +740,7 @@ class ManejadorJuego:
             "MENU_PRINCIPAL": [self.btn_jugar, self.btn_opciones, self.btn_instrucciones, self.btn_salir],
             "MENU_MODOS": [self.btn_vs_cpu, self.btn_multi, self.btn_duelo, self.btn_volver_menu],
             "SELECCION_CANTIDAD_JUGADORES": [self.btn_cant_2, self.btn_cant_3, self.btn_cant_4, self.btn_cant_volver],
-            "MENU_OPCIONES": [self.btn_toggle_musica, self.btn_toggle_sfx, self.btn_reset_scores, self.btn_volver],
+            "MENU_OPCIONES": [self.btn_toggle_musica, self.slider_musica, self.btn_toggle_sfx, self.slider_sfx, self.btn_volver],
             "INSTRUCCIONES": [self.btn_instrucciones_volver],
             "PAUSA": [self.btn_reanudar, self.btn_pausa_opciones, self.btn_pausa_menu],
             "FIN_JUEGO": [self.btn_reiniciar, self.btn_fin_menu],
@@ -619,8 +764,7 @@ class ManejadorJuego:
                 self.reproducir_sonido(self.snd_click)
                 self.estado = "INSTRUCCIONES"
             elif self.btn_salir.fue_clicado(pos_m):
-                self.reproducir_sonido(self.snd_salir)
-                self.ejecutando = False
+                self.salir_del_juego()
 
         elif self.estado == "INSTRUCCIONES":
             if self.btn_instrucciones_volver.fue_clicado(pos_m):
@@ -693,12 +837,6 @@ class ManejadorJuego:
                 Config.sfx_activo = not Config.sfx_activo
                 self.reproducir_sonido(self.snd_click)
                 self.btn_toggle_sfx.definir_texto("SFX: SI" if Config.sfx_activo else "SFX: NO")
-            elif self.btn_reset_scores.fue_clicado(pos_m):
-                self.reproducir_sonido(self.snd_click)
-                self.victorias_j1 = 0
-                self.victorias_j2 = 0
-                self.btn_reset_scores.definir_texto("RESETEADO OK!")
-                pygame.time.set_timer(pygame.USEREVENT + 1, 1000)
             elif self.btn_volver.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 self.estado = self.estado_previo_opciones
@@ -757,11 +895,6 @@ class ManejadorJuego:
 
             if self._pista_para_estado_actual() == "menu":
                 self.reproducir_musica("menu")
-                # El sonido de Kamek solo debe sonar la primera vez que se
-                # entra al Menú Principal (viniendo de la Pantalla de Título),
-                # no cada vez que se vuelve a él desde Opciones, Pausa, etc.
-                if self.estado == "MENU_PRINCIPAL" and estado_anterior == "PANTALLA_TITULO":
-                    self.reproducir_sonido(self.snd_kamek)
 
         if self.estado == "PANTALLA_TITULO":
             # Animación del GIF de fondo
@@ -795,25 +928,27 @@ class ManejadorJuego:
             self.btn_cant_4.actualizar(pos_mouse)
             self.btn_cant_volver.actualizar(pos_mouse)
         elif self.estado == "MENU_SELECCION_PERSONAJES":
-            # Resaltar tarjeta de personaje en 1280x720
-            chars = Config.PERSONAJES
-            for i in range(8):
-                row = i // 4
-                col = i % 4
-                card_x = 140 + col * 260
-                card_y = 150 + row * 260
-                if pygame.Rect(card_x, card_y, 220, 220).collidepoint(pos_mouse):
-                    tomado = False
-                    for p_name in self.personajes_seleccionados.values():
-                        if p_name == chars[i]:
-                            tomado = True
-                            break
-                    if not tomado:
-                        self.personaje_resaltado = i
+            # Resaltar tarjeta de personaje solo si el usuario movió el mouse
+            if self.modo_entrada == "MOUSE":
+                chars = Config.PERSONAJES
+                for i in range(8):
+                    row = i // 4
+                    col = i % 4
+                    card_x = 140 + col * 260
+                    card_y = 150 + row * 260
+                    if pygame.Rect(card_x, card_y, 220, 220).collidepoint(pos_mouse):
+                        tomado = False
+                        for p_name in self.personajes_seleccionados.values():
+                            if p_name == chars[i]:
+                                tomado = True
+                                break
+                        if not tomado:
+                            self.personaje_resaltado = i
         elif self.estado == "MENU_OPCIONES":
             self.btn_toggle_musica.actualizar(pos_mouse)
+            self.slider_musica.actualizar(pos_mouse)
             self.btn_toggle_sfx.actualizar(pos_mouse)
-            self.btn_reset_scores.actualizar(pos_mouse)
+            self.slider_sfx.actualizar(pos_mouse)
             self.btn_volver.actualizar(pos_mouse)
         elif self.estado == "PAUSA":
             self.btn_reanudar.actualizar(pos_mouse)
@@ -823,12 +958,15 @@ class ManejadorJuego:
             self.btn_reiniciar.actualizar(pos_mouse)
             self.btn_fin_menu.actualizar(pos_mouse)
 
-        # --- SINCRONIZAR MANO INDICADORA (mouse + navegación por teclado) ---
+        # --- SINCRONIZAR MANO INDICADORA (mouse activo vs navegación por teclado) ---
         grupo_botones = self.obtener_grupo_botones_actual()
         if grupo_botones:
-            indice_hover = next((i for i, b in enumerate(grupo_botones) if b.hover), None)
-            if indice_hover is not None:
-                self.indice_menu_actual = indice_hover
+            if self.modo_entrada == "MOUSE":
+                indice_hover = next((i for i, b in enumerate(grupo_botones) if b.hover), None)
+                if indice_hover is not None:
+                    self.indice_menu_actual = indice_hover
+            
+            self.indice_menu_actual = max(0, min(self.indice_menu_actual, len(grupo_botones) - 1))
             for i, b in enumerate(grupo_botones):
                 b.set_resaltado_teclado(i == self.indice_menu_actual)
 
@@ -854,39 +992,52 @@ class ManejadorJuego:
             cuerda_afectada = self.cuerdas[j_actual.cuerda_elegida]
             
             if self.sub_estado_animacion == "CAMINANDO":
-                x_destino = cuerda_afectada.x - Config.CHAR_ANCHO // 2
-                y_destino = self.obtener_y_elipse(cuerda_afectada.x, obtener_borde_inferior=True) - (Config.CHAR_ALTO - 10)
-                duracion_caminata = 800
+                ang_destino = self.obtener_angulo_cuerda(cuerda_afectada.x)
+                ang_inicio = self.angulo_original_jugador
+                duracion_caminata = 1000
                 if transcurrido < duracion_caminata:
                     progreso = transcurrido / duracion_caminata
-                    j_actual.x = self.x_original_jugador + (x_destino - self.x_original_jugador) * progreso
-                    j_actual.y = self.y_original_jugador + (y_destino - self.y_original_jugador) * progreso
+                    diff_ang = (ang_destino - ang_inicio) % (2 * math.pi)
+                    if diff_ang > math.pi:
+                        diff_ang -= 2 * math.pi
+                    ang_actual = ang_inicio + diff_ang * progreso
+                    px, py = self.obtener_posicion_en_anillo(ang_actual)
+                    # Brincos rítmicos al caminar estilo Mario Party
+                    bamboleo_pasos = abs(math.sin(progreso * math.pi * 6)) * 14
+                    j_actual.x = px
+                    j_actual.y = py - bamboleo_pasos
+                    j_actual.angulo_actual = ang_actual
                 else:
-                    j_actual.x = x_destino
-                    j_actual.y = y_destino
+                    px, py = self.obtener_posicion_en_anillo(ang_destino)
+                    j_actual.x = px
+                    j_actual.y = py
+                    j_actual.angulo_actual = ang_destino
                     self.sub_estado_animacion = "JALANDO"
                     self.tiempo_inicio_sub_estado = pygame.time.get_ticks()
                     self.reproducir_sonido(self.snd_tension)
             
             elif self.sub_estado_animacion == "JALANDO":
-                self.cuerdas_reveladas_indices.add(j_actual.cuerda_elegida)
+                # SUSPENSO: Durante los 4 tirones NO se revela la recompensa bajo el agua.
                 if transcurrido < self.duracion_animacion_jalon:
                     progreso_jalon = transcurrido / self.duracion_animacion_jalon
-                    es_monstruo = cuerda_afectada.contenido != "Pez Bueno"
                     
-                    if es_monstruo:
-                        amplitud = 6 + int(progreso_jalon * 10)
-                        velocidad_osc = 0.08 + progreso_jalon * 0.10
-                    else:
-                        amplitud = 5
-                        velocidad_osc = 0.08
+                    # 4 tirones intensos y pausados con gran suspenso
+                    num_tirones = 4
+                    fase_tiron = progreso_jalon * num_tirones
+                    progreso_sub = fase_tiron - int(fase_tiron)
                     
-                    vibracion_y = int(math.sin(transcurrido * velocidad_osc) * amplitud)
-                    vibracion_x = int(math.cos(transcurrido * velocidad_osc) * (amplitud * 0.6))
-                    j_actual.x = (cuerda_afectada.x - Config.CHAR_ANCHO // 2) + vibracion_x
-                    j_actual.y = (self.obtener_y_elipse(cuerda_afectada.x, obtener_borde_inferior=True) - (Config.CHAR_ALTO - 10)) + vibracion_y
-                    cuerda_afectada.y_fin = self.altura_reposo_cuerda + vibracion_y * 1.5
+                    # Curva de esfuerzo pesado (tira hacia atrás y suelta ligeramente)
+                    fuerza_y = math.sin(progreso_sub * math.pi) * 12
+                    fuerza_x = math.cos(progreso_sub * math.pi) * 5
+                    
+                    ang_cuerda = self.obtener_angulo_cuerda(cuerda_afectada.x)
+                    px, py = self.obtener_posicion_en_anillo(ang_cuerda)
+                    j_actual.x = px + fuerza_x
+                    j_actual.y = py + fuerza_y
+                    cuerda_afectada.y_fin = self.altura_reposo_cuerda + fuerza_y * 0.8
                 else:
+                    # REVELACIÓN: Al completar los 4 tirones de suspenso, se revela el item
+                    self.cuerdas_reveladas_indices.add(j_actual.cuerda_elegida)
                     if cuerda_afectada.contenido == "Pez Bueno":
                         self.sub_estado_animacion = "SUBIENDO_PEZ"
                         self.reproducir_sonido(self.snd_pez)
@@ -901,37 +1052,53 @@ class ManejadorJuego:
                 if transcurrido < self.duracion_subida_pez:
                     progreso = transcurrido / self.duracion_subida_pez
                     y_fondo = self.altura_reposo_cuerda
-                    y_superficie = Config.NIVEL_AGUA + 25
+                    y_superficie = Config.NIVEL_AGUA + 60
                     cuerda_afectada.y_fin = y_fondo - (y_fondo - y_superficie) * progreso
+                    # Salto festivo del personaje al pescar un Pez Bueno
+                    bamboleo_vic = abs(math.sin(progreso * math.pi * 4)) * 10
+                    ang_cuerda = self.obtener_angulo_cuerda(cuerda_afectada.x)
+                    px, py = self.obtener_posicion_en_anillo(ang_cuerda)
+                    j_actual.x = px
+                    j_actual.y = py - bamboleo_vic
                 else:
-                    cuerda_afectada.y_fin = Config.NIVEL_AGUA + 25
+                    cuerda_afectada.y_fin = Config.NIVEL_AGUA + 60
+                    cuerda_afectada.atrapado = True
                     self.pasar_al_siguiente_jugador()
 
             elif self.sub_estado_animacion == "CAYENDO":
                 if transcurrido < self.duracion_caida_jugador:
                     progreso = transcurrido / self.duracion_caida_jugador
-                    fase_ataque = 0.22
-                    y_profundo_inicio = self.altura_reposo_cuerda
-                    y_ataque = Config.NIVEL_AGUA - 15
-                    y_profundo_final = self.altura_reposo_cuerda + 40
+                    fase_monstruo = 0.35  # Primeros 35% del tiempo: el monstruo sube y cae de regreso al mar
                     
-                    if progreso < fase_ataque:
-                        sub = progreso / fase_ataque
-                        cuerda_afectada.y_fin = y_profundo_inicio + (y_ataque - y_profundo_inicio) * math.sin(sub * math.pi / 2)
-                        if sub >= 0.9 and not self.sonido_ataque_reproducido:
+                    y_profundo_inicio = self.altura_reposo_cuerda
+                    y_ataque = Config.NIVEL_AGUA + 30
+                    
+                    ang_cuerda = self.obtener_angulo_cuerda(cuerda_afectada.x)
+                    px, py = self.obtener_posicion_en_anillo(ang_cuerda)
+                    
+                    if progreso < fase_monstruo:
+                        # Fase 1: El monstruo sale del agua a morder y vuelve a caer al fondo del mar
+                        sub = progreso / fase_monstruo
+                        altura_sinus = math.sin(sub * math.pi)
+                        cuerda_afectada.y_fin = y_profundo_inicio - (y_profundo_inicio - y_ataque) * altura_sinus
+                        
+                        if sub >= 0.4 and not self.sonido_ataque_reproducido:
                             self.reproducir_sonido(self.snd_splash)
                             self.sonido_ataque_reproducido = True
+                        
+                        # El personaje tiembla asustado exactamente en su posición del salvavidas
+                        sacudida_caida = math.sin(transcurrido * 0.03) * 4
+                        j_actual.x = px + sacudida_caida
+                        j_actual.y = py
                     else:
-                        sub = (progreso - fase_ataque) / (1 - fase_ataque)
-                        cuerda_afectada.y_fin = y_ataque + (y_profundo_final - y_ataque) * sub
-                    
-                    distancia_caida = (self.altura_reposo_cuerda - 10) - self.y_al_soltar
-                    j_actual.y = self.y_al_soltar + (distancia_caida * progreso)
-
-                    # El personaje desaparece apenas su sprite toca la superficie del
-                    # agua (no al llegar al fondo), ya que ahí lo atrapa el monstruo.
-                    if not j_actual.sumergido and j_actual.y + Config.CHAR_ALTO >= Config.NIVEL_AGUA:
-                        j_actual.sumergido = True
+                        # Fase 2: El monstruo ya cayó al mar. El personaje cae visiblemente hacia el agua a velocidad mediana
+                        cuerda_afectada.y_fin = self.altura_reposo_cuerda
+                        sub = (progreso - fase_monstruo) / (1.0 - fase_monstruo)
+                        
+                        distancia_caida = (Config.NIVEL_AGUA + 80) - py
+                        sacudida_caida = math.sin(transcurrido * 0.015) * 3
+                        j_actual.x = px + sacudida_caida
+                        j_actual.y = py + (distancia_caida * (sub ** 1.4))
                 else:
                     self.reproducir_sonido(self.snd_splash)
                     cuerda_afectada.y_fin = self.altura_reposo_cuerda
@@ -952,8 +1119,10 @@ class ManejadorJuego:
                 
                 if self.segundos_restantes != self.ultimo_segundo_alerta:
                     self.ultimo_segundo_alerta = self.segundos_restantes
-                    if self.segundos_restantes <= 2 and self.segundos_restantes > 0 and not j_actual.es_cpu:
-                        self.reproducir_sonido(self.snd_alerta)
+                    if self.segundos_restantes == 2 and not j_actual.es_cpu:
+                        if Config.sfx_activo and self.snd_alerta:
+                            self.snd_alerta.stop()
+                            self.reproducir_sonido(self.snd_alerta)
 
                 if not j_actual.es_cpu:
                     self.cuerda_resaltada = self.obtener_cuerda_bajo_mouse(pos_mouse)
@@ -990,11 +1159,20 @@ class ManejadorJuego:
         self.indice_revelacion_actual += 1
         self.tiempo_inicio_sub_estado = pygame.time.get_ticks()
         
+        # Resetear altura de cuerdas NO pescadas para que permanezcan en el fondo,
+        # pero MANTENER ARRIBA las cuerdas que ya fueron pescadas exitosamente (c.atrapado == True).
+        for c in self.cuerdas:
+            if not c.atrapado:
+                c.y_fin = self.altura_reposo_cuerda
+            else:
+                c.y_fin = Config.NIVEL_AGUA + 60
+
         if self.indice_revelacion_actual < len(self.jugadores_en_orden_revelacion):
             self.sub_estado_animacion = "CAMINANDO"
             j_sig = self.jugadores_en_orden_revelacion[self.indice_revelacion_actual]
             self.x_original_jugador = j_sig.x
             self.y_original_jugador = j_sig.y
+            self.angulo_original_jugador = j_sig.angulo_actual
         else:
             self.estado = "EN_JUEGO"
             self.revelado = True
@@ -1009,26 +1187,43 @@ class ManejadorJuego:
                     if self.victorias_j1 == 2 or self.victorias_j2 == 2:
                         self.duelo_finalizado = True
                         nombre_g = self.jugadores[0].nombre if self.victorias_j1 == 2 else self.jugadores[1].nombre
-                        self.mensaje_partida = f"GANADOR DEFINITIVO: {nombre_g}! [PRESIONA UNA TECLA]"
+                        self.mensaje_partida = f"GANADOR DEFINITIVO: {nombre_g}!"
+                        self.detener_musica()
                         self.reproducir_sonido(self.snd_victoria)
+                        self.estado = "FIN_JUEGO"
                     else:
-                        self.mensaje_partida = f"Set para Jugador {ganador_set}. Marcador: {self.victorias_j1}-{self.victorias_j2}. [PRESIONA UNA TECLA]"
+                        self.mensaje_partida = f"¡Set para Jugador {ganador_set}! Marcador: {self.victorias_j1} - {self.victorias_j2}  [Haz clic para continuar]"
+                        self.detener_musica()
                         self.reproducir_sonido(self.snd_victoria)
                         self.esperando_confirmacion_set = True
+                        self.siguiente_set_muerte_subita = False
                 elif len(vivos_reales) == 0:
-                    self.muerte_subita_activa = True
-                    self.mensaje_partida = "¡Empate en el Set! Muerte Súbita Activa. [PRESIONA UNA TECLA]"
+                    if self.victorias_j1 == 1 and self.victorias_j2 == 1:
+                        self.muerte_subita_activa = True
+                        self.siguiente_set_muerte_subita = True
+                        self.mensaje_partida = "¡Empate a 1-1! Muerte Súbita Activa  [Haz clic para continuar]"
+                    else:
+                        self.muerte_subita_activa = False
+                        self.siguiente_set_muerte_subita = False
+                        self.mensaje_partida = f"¡Empate en el Set! Marcador: {self.victorias_j1} - {self.victorias_j2}  [Haz clic para continuar]"
+                    self.detener_musica()
                     self.reproducir_sonido(self.snd_derrota)
                     self.esperando_confirmacion_set = True
+                else:
+                    self.mensaje_partida = "¡Ronda terminada! Haz clic o presiona una tecla para continuar"
             else:
                 if len(vivos_reales) == 1:
-                    self.mensaje_partida = f"¡GANADOR: {vivos_reales[0].nombre}! [PRESIONA UNA TECLA]"
+                    self.mensaje_partida = f"¡GANADOR: {vivos_reales[0].nombre}!"
+                    self.detener_musica()
                     self.reproducir_sonido(self.snd_victoria)
+                    self.estado = "FIN_JUEGO"
                 elif len(vivos_reales) == 0:
-                    self.mensaje_partida = "¡NADIE SOBREVIVIÓ! [PRESIONA UNA TECLA]"
+                    self.mensaje_partida = "¡NADIE SOBREVIVIÓ!"
+                    self.detener_musica()
                     self.reproducir_sonido(self.snd_derrota)
+                    self.estado = "FIN_JUEGO"
                 else:
-                    self.mensaje_partida = "¡Ronda terminada! Presiona cualquier tecla para continuar"
+                    self.mensaje_partida = "¡Ronda terminada! Haz clic o presiona una tecla para continuar"
 
     def obtener_cuerda_bajo_mouse(self, pos_mouse):
         mejor_idx = None
@@ -1085,7 +1280,13 @@ class ManejadorJuego:
     def manejar_eventos(self):
         for evento in pygame.event.get():
             if evento.type == pygame.QUIT:
-                self.ejecutando = False
+                self.salir_del_juego()
+
+            if evento.type == pygame.MOUSEMOTION:
+                if evento.rel != (0, 0):
+                    self.modo_entrada = "MOUSE"
+            elif evento.type == pygame.KEYDOWN:
+                self.modo_entrada = "TECLADO"
 
             if self.estado == "MENU_OPCIONES":
                 if self.slider_musica.handle_event(evento):
@@ -1095,22 +1296,24 @@ class ManejadorJuego:
                     Config.volumen_sfx = self.slider_sfx.value
                     self.aplicar_volumen_sfx()
 
+            teclas_reservadas = (
+                pygame.K_ESCAPE, pygame.K_F1, pygame.K_F2, pygame.K_F3, pygame.K_F4,
+                pygame.K_F5, pygame.K_F6, pygame.K_F7, pygame.K_F8, pygame.K_F9,
+                pygame.K_F10, pygame.K_F11, pygame.K_F12
+            )
+
             if self.estado == "PANTALLA_TITULO":
-                if evento.type == pygame.KEYDOWN or (evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1):
+                es_tecla = (evento.type == pygame.KEYDOWN and evento.key not in teclas_reservadas)
+                es_clic = (evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1)
+                if es_tecla or es_clic:
                     self.reproducir_sonido(self.snd_click)
                     self.estado = "MENU_PRINCIPAL"
                     continue
 
-            # CORRECCIÓN DE BUG: antes esta condición solo verificaba "self.revelado",
-            # una bandera que queda en True luego de terminar una ronda y NO se
-            # reiniciaba al volver a los menús (Menú Principal, Pausa, Fin de Juego, etc.).
-            # Esto provocaba que, tras jugar una partida, presionar cualquier tecla en
-            # esos menús ejecutara procesar_enter() por error (a veces saltando de golpe
-            # a la pantalla "PARTIDA FINALIZADA"). Se restringe explícitamente a que solo
-            # ocurra mientras se está EN_JUEGO, que es el único estado donde este atajo
-            # de "avanzar de ronda con cualquier tecla" tiene sentido.
-            if self.revelado and self.estado == "EN_JUEGO" and evento.type == pygame.KEYDOWN:
-                if evento.key != pygame.K_ESCAPE and evento.key != pygame.K_F3:
+            if self.revelado and self.estado == "EN_JUEGO":
+                es_tecla = (evento.type == pygame.KEYDOWN and evento.key not in teclas_reservadas)
+                es_clic = (evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1)
+                if es_tecla or es_clic:
                     self.reproducir_sonido(self.snd_click)
                     self.procesar_enter()
                     continue
@@ -1118,37 +1321,37 @@ class ManejadorJuego:
             if evento.type == pygame.MOUSEBUTTONDOWN and evento.button == 1:
                 pos_m = pygame.mouse.get_pos()
 
+                estado_antes_click = self.estado
                 self.procesar_click_menu(pos_m)
 
-                if self.estado == "MENU_SELECCION_PERSONAJES":
-                    chars = Config.PERSONAJES
-                    for i in range(8):
-                        row = i // 4
-                        col = i % 4
-                        card_x = 140 + col * 260
-                        card_y = 150 + row * 260
-                        if pygame.Rect(card_x, card_y, 220, 220).collidepoint(pos_m):
-                            tomado = False
-                            for p_name in self.personajes_seleccionados.values():
-                                if p_name == chars[i]:
-                                    tomado = True
-                                    break
-                            if not tomado:
-                                self.seleccionar_personaje_activo(chars[i])
+                if self.estado == estado_antes_click:
+                    if self.estado == "MENU_SELECCION_PERSONAJES":
+                        chars = Config.PERSONAJES
+                        for i in range(8):
+                            row = i // 4
+                            col = i % 4
+                            card_x = 140 + col * 260
+                            card_y = 150 + row * 260
+                            if pygame.Rect(card_x, card_y, 220, 220).collidepoint(pos_m):
+                                tomado = False
+                                for p_name in self.personajes_seleccionados.values():
+                                    if p_name == chars[i]:
+                                        tomado = True
+                                        break
+                                if not tomado:
+                                    self.seleccionar_personaje_activo(chars[i])
 
-                elif self.estado == "EN_JUEGO":
-                    jugadores_vivos = [j for j in self.jugadores if j.vivo]
-                    if self.turno_actual < len(jugadores_vivos) and not jugadores_vivos[self.turno_actual].es_cpu and not self.revelado:
-                        idx_clic = self.obtener_cuerda_bajo_mouse(pos_m)
-                        if idx_clic is not None:
-                            self.seleccionar_cuerda_para_jugador(idx_clic, jugadores_vivos[self.turno_actual], jugadores_vivos)
-
-            if evento.type == pygame.USEREVENT + 1:
-                self.btn_reset_scores.definir_texto("RESETEAR MARCADOR")
-                pygame.time.set_timer(pygame.USEREVENT + 1, 0)
+                    elif self.estado == "EN_JUEGO":
+                        jugadores_vivos = [j for j in self.jugadores if j.vivo]
+                        if self.turno_actual < len(jugadores_vivos) and not jugadores_vivos[self.turno_actual].es_cpu and not self.revelado:
+                            idx_clic = self.obtener_cuerda_bajo_mouse(pos_m)
+                            if idx_clic is not None:
+                                self.seleccionar_cuerda_para_jugador(idx_clic, jugadores_vivos[self.turno_actual], jugadores_vivos)
 
             if evento.type == pygame.KEYDOWN:
-                if evento.key == pygame.K_F3:
+                if evento.key == pygame.K_F1:
+                    self.toggle_silencio_global()
+                elif evento.key == pygame.K_F3:
                     self.mostrar_debug_fps = not self.mostrar_debug_fps
 
                 if evento.key == pygame.K_ESCAPE:
@@ -1168,7 +1371,10 @@ class ManejadorJuego:
                         elif self.estado_previo_a_pausa == "ESPERA_POST_SELECCION":
                             self.momento_pausa_post_seleccion += delta_pausa
                         self.estado = self.estado_previo_a_pausa
-                    elif self.estado in ["MENU_MODOS", "SELECCION_CANTIDAD_JUGADORES", "MENU_SELECCION_PERSONAJES", "MENU_OPCIONES", "INSTRUCCIONES"]:
+                    elif self.estado == "MENU_OPCIONES":
+                        self.reproducir_sonido(self.snd_click)
+                        self.estado = self.estado_previo_opciones
+                    elif self.estado in ["MENU_MODOS", "SELECCION_CANTIDAD_JUGADORES", "MENU_SELECCION_PERSONAJES", "INSTRUCCIONES"]:
                         self.reproducir_sonido(self.snd_click)
                         self.estado = "MENU_PRINCIPAL"
                     elif self.estado == "FIN_JUEGO":
@@ -1176,8 +1382,7 @@ class ManejadorJuego:
                         self.revelado = False
                         self.estado = "MENU_PRINCIPAL"
                     else:
-                        self.reproducir_sonido(self.snd_salir)
-                        self.ejecutando = False
+                        self.salir_del_juego()
                 
                 if self.estado == "MENU_SELECCION_PERSONAJES":
                     chars = Config.PERSONAJES
@@ -1253,19 +1458,58 @@ class ManejadorJuego:
                             self.seleccionar_cuerda_para_jugador(idx, jugadores_vivos[self.turno_actual], jugadores_vivos)
 
                 else:
-                    # --- NAVEGACIÓN CON TECLADO EN MENÚS DE BOTONES ---
-                    # Flechas mueven la mano indicadora; ENTER/ESPACIO confirma
-                    # la opción resaltada (igual que un clic de mouse).
+                    # --- NAVEGACIÓN CON TECLADO EN MENÚS DE BOTONES Y SLIDERS ---
                     grupo = self.obtener_grupo_botones_actual()
                     if grupo:
-                        if evento.key in (pygame.K_UP, pygame.K_LEFT, pygame.K_w, pygame.K_a):
+                        self.indice_menu_actual = max(0, min(self.indice_menu_actual, len(grupo) - 1))
+                        elem_actual = grupo[self.indice_menu_actual]
+                        
+                        if evento.key in (pygame.K_UP, pygame.K_w):
                             self.indice_menu_actual = (self.indice_menu_actual - 1) % len(grupo)
                             self.reproducir_sonido(self.snd_seleccion)
-                        elif evento.key in (pygame.K_DOWN, pygame.K_RIGHT, pygame.K_s, pygame.K_d):
+                        elif evento.key in (pygame.K_DOWN, pygame.K_s):
+                            self.indice_menu_actual = (self.indice_menu_actual + 1) % len(grupo)
+                            self.reproducir_sonido(self.snd_seleccion)
+                        elif self.estado == "MENU_OPCIONES" and evento.key in (pygame.K_LEFT, pygame.K_a, pygame.K_MINUS, pygame.K_KP_MINUS):
+                            if elem_actual == self.slider_musica:
+                                if self.slider_musica.modificar_valor(-0.05):
+                                    Config.volumen_musica = self.slider_musica.value
+                                    self.aplicar_volumen_musica()
+                                    self.reproducir_sonido(self.snd_seleccion)
+                            elif elem_actual == self.slider_sfx:
+                                if self.slider_sfx.modificar_valor(-0.05):
+                                    Config.volumen_sfx = self.slider_sfx.value
+                                    self.aplicar_volumen_sfx()
+                                    self.reproducir_sonido(self.snd_seleccion)
+                            else:
+                                self.indice_menu_actual = (self.indice_menu_actual - 1) % len(grupo)
+                                self.reproducir_sonido(self.snd_seleccion)
+                        elif self.estado == "MENU_OPCIONES" and evento.key in (pygame.K_RIGHT, pygame.K_d, pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS):
+                            if elem_actual == self.slider_musica:
+                                if self.slider_musica.modificar_valor(0.05):
+                                    Config.volumen_musica = self.slider_musica.value
+                                    self.aplicar_volumen_musica()
+                                    self.reproducir_sonido(self.snd_seleccion)
+                            elif elem_actual == self.slider_sfx:
+                                if self.slider_sfx.modificar_valor(0.05):
+                                    Config.volumen_sfx = self.slider_sfx.value
+                                    self.aplicar_volumen_sfx()
+                                    self.reproducir_sonido(self.snd_seleccion)
+                            else:
+                                self.indice_menu_actual = (self.indice_menu_actual + 1) % len(grupo)
+                                self.reproducir_sonido(self.snd_seleccion)
+                        elif evento.key not in (pygame.K_LEFT, pygame.K_a, pygame.K_RIGHT, pygame.K_d) and evento.key in (pygame.K_UP, pygame.K_LEFT, pygame.K_w, pygame.K_a):
+                            self.indice_menu_actual = (self.indice_menu_actual - 1) % len(grupo)
+                            self.reproducir_sonido(self.snd_seleccion)
+                        elif evento.key in (pygame.K_LEFT, pygame.K_a):
+                            self.indice_menu_actual = (self.indice_menu_actual - 1) % len(grupo)
+                            self.reproducir_sonido(self.snd_seleccion)
+                        elif evento.key in (pygame.K_RIGHT, pygame.K_d):
                             self.indice_menu_actual = (self.indice_menu_actual + 1) % len(grupo)
                             self.reproducir_sonido(self.snd_seleccion)
                         elif evento.key in (pygame.K_RETURN, pygame.K_SPACE):
-                            self.procesar_click_menu(grupo[self.indice_menu_actual].rect.center)
+                            if hasattr(elem_actual, 'rect'):
+                                self.procesar_click_menu(elem_actual.rect.center)
 
     def seleccionar_personaje_activo(self, char_name):
         self.reproducir_sonido(self.snd_click)
@@ -1303,6 +1547,7 @@ class ManejadorJuego:
     def reiniciar_partida_completa(self):
         self.num_ronda = 1
         self.muerte_subita_activa = False
+        self.siguiente_set_muerte_subita = False
         self.cuerdas_reveladas_indices.clear()
         self.generar_ronda([j for j in self.jugadores if j.vivo], self.muerte_subita_activa)
         self.turno_actual = 0
@@ -1347,13 +1592,61 @@ class ManejadorJuego:
             j.sumergido = False
         self.num_ronda = 1
         self.cuerdas_reveladas_indices.clear()
+        if getattr(self, 'siguiente_set_muerte_subita', False):
+            self.muerte_subita_activa = True
+        else:
+            self.muerte_subita_activa = False
         self.generar_ronda(self.jugadores, self.muerte_subita_activa)
         self.turno_actual = 0
         self.revelado = False
         self.momento_inicio_turno = 0
         self.ultimo_segundo_alerta = 5
         self.momento_inicio_pensamiento_cpu = 0
-        self.mensaje_partida = ""
+    def dibujar_plataforma_modular(self):
+        """Dibuja la plataforma circular/elíptica de 430x175 px con la textura de borde incorporada claramente visible."""
+        if self.sprite_platform:
+            self.pantalla.blit(self.sprite_platform, (Config.SALV_X, Config.SALV_Y))
+            return
+
+        w = Config.SALV_ANCHO
+        h = Config.SALV_ALTO
+        cx = Config.SALV_X + w // 2
+        cy = Config.SALV_Y + h // 2
+        
+        # 1. Base / Borde 3D inferior bajo el agua (Efecto de volumen náutico)
+        profundidad_3d = 14
+        for offset_y in range(profundidad_3d, 0, -2):
+            grosor_color = (130, 20, 20) if offset_y > 6 else (170, 30, 30)
+            pygame.draw.ellipse(self.pantalla, grosor_color, (Config.SALV_X, Config.SALV_Y + offset_y, w, h))
+
+        # 2. Anillo exterior circular sólido (Rojo Mario)
+        rect_ext = pygame.Rect(Config.SALV_X, Config.SALV_Y, w, h)
+        pygame.draw.ellipse(self.pantalla, (215, 40, 40), rect_ext)
+        pygame.draw.ellipse(self.pantalla, Config.NEGRO, rect_ext, width=3)
+
+        # 3. Franja decorativa circular blanca (Salvavidas Mario Party)
+        m_x = 24
+        m_y = 15
+        rect_franja = pygame.Rect(Config.SALV_X + m_x, Config.SALV_Y + m_y, w - m_x * 2, h - m_y * 2)
+        pygame.draw.ellipse(self.pantalla, (245, 245, 245), rect_franja, width=12)
+
+        # 4. Relleno interior uniforme del piso (Tono cálido pulido sin agujeros huecos)
+        p_x = 36
+        p_y = 22
+        rect_piso = pygame.Rect(Config.SALV_X + p_x, Config.SALV_Y + p_y, w - p_x * 2, h - p_y * 2)
+        pygame.draw.ellipse(self.pantalla, (190, 40, 40), rect_piso)
+        pygame.draw.ellipse(self.pantalla, (140, 25, 25), rect_piso, width=2)
+
+        # 5. TEXTURA DE BORDE (border_texture.png): Renderizada AL FINAL sobre el borde frontal para máxima visibilidad
+        if self.sprite_border_texture:
+            b_w = Config.SALV_ANCHO
+            b_h = int(self.sprite_border_texture.get_height() * (b_w / self.sprite_border_texture.get_width()))
+            tex_escalada = pygame.transform.scale(self.sprite_border_texture, (b_w, max(25, b_h)))
+            
+            pos_x = Config.SALV_X
+            pos_y = Config.SALV_Y + (h // 2) - 5
+            self.pantalla.blit(tex_escalada, (pos_x, pos_y))
+            pygame.draw.arc(self.pantalla, Config.NEGRO, (Config.SALV_X, Config.SALV_Y + (h // 2) - 5, b_w, max(25, b_h)), math.pi, 2 * math.pi, 2)
 
     def dibujar_fondo_marino(self):
         puntos_arena = [(0, Config.ALTO)]
@@ -1383,8 +1676,66 @@ class ManejadorJuego:
                 ancho_linea = int(8 * (1.0 - (paso / len(puntos_alga)) * 0.5))
                 pygame.draw.line(self.pantalla, (34, 139, 34), p1, p2, ancho_linea)
 
+    def dibujar_estela_flotacion_agua(self):
+        """Método reservado para efectos de oleaje ambiental."""
+        pass
+
+    def dibujar_titulo_animado(self, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110, tamano_titulo=56, tamano_sub=32):
+        if centro_x is None:
+            centro_x = Config.ANCHO // 2
+            
+        t = pygame.time.get_ticks()
+        fuente_grande = pygame.font.Font(Config.FUENTE_PRINCIPAL, tamano_titulo)
+        
+        colores_mp = [
+            (220, 20, 60),    # Rojo
+            (30, 144, 255),   # Azul
+            (34, 139, 34),    # Verde
+            (255, 215, 0),    # Amarillo
+            (138, 43, 226),   # Violeta
+            (255, 140, 0),    # Naranja
+            (0, 255, 255),    # Celeste
+            (255, 105, 180)   # Rosa
+        ]
+        
+        ancho_total = 0
+        surfs_letras = []
+        for i, char in enumerate(texto_titulo):
+            color = colores_mp[i % len(colores_mp)]
+            surf_c = fuente_grande.render(char, True, color)
+            surfs_letras.append((char, surf_c))
+            ancho_total += surf_c.get_width()
+            
+        x_cursor = centro_x - (ancho_total // 2)
+        
+        for i, (char, surf_c) in enumerate(surfs_letras):
+            y_wave = math.sin(t * 0.007 + i * 0.4) * 14
+            pos_y = base_y - 25 + y_wave
+            
+            # Sombra de la letra
+            surf_shadow = fuente_grande.render(char, True, Config.NEGRO)
+            self.pantalla.blit(surf_shadow, (x_cursor + 3, pos_y + 3))
+            # Letra coloreada
+            self.pantalla.blit(surf_c, (x_cursor, pos_y))
+            
+            x_cursor += surf_c.get_width()
+            
+        if texto_sub:
+            fuente_sub = pygame.font.Font(Config.FUENTE_PRINCIPAL, tamano_sub)
+            color_sub = Config.AMARILLO if (t // 300) % 2 == 0 else Config.BLANCO
+            
+            txt_sub = fuente_sub.render(texto_sub, True, color_sub)
+            rect_sub = txt_sub.get_rect(center=(centro_x, base_y + 42))
+            
+            shadow_sub = fuente_sub.render(texto_sub, True, Config.NEGRO)
+            rect_shadow_sub = shadow_sub.get_rect(center=(centro_x + 2, base_y + 44))
+            
+            self.pantalla.blit(shadow_sub, rect_shadow_sub)
+            self.pantalla.blit(txt_sub, rect_sub)
+
     def renderizar(self, pos_mouse):
-        self.pantalla.blit(self.bg_image, (0, 0))
+        self.pantalla.blit(self.bg_image_top, (0, 0))
+        self.pantalla.blit(self.bg_image_bottom, (0, Config.NIVEL_AGUA))
         
         if self.estado == "PANTALLA_TITULO":
             # Dibujar el GIF animado de fondo (si se cargó)
@@ -1399,58 +1750,8 @@ class ManejadorJuego:
                 
             t = pygame.time.get_ticks()
             
-            # --- TÍTULO ESTILO MARIO PARTY ---
-            # Letras gigantes que ondulan de forma independiente con múltiples colores
-            texto_titulo = "CHEEP CHEEP CHANCE"
-            fuente_grande = pygame.font.Font(Config.FUENTE_PRINCIPAL, 60)
-            
-            colores_mp = [
-                (220, 20, 60),    # Rojo
-                (30, 144, 255),   # Azul
-                (34, 139, 34),    # Verde
-                (255, 215, 0),    # Amarillo
-                (138, 43, 226),   # Violeta
-                (255, 140, 0),    # Naranja
-                (0, 255, 255),    # Celeste
-                (255, 105, 180)   # Rosa
-            ]
-            
-            # Pre-calcular ancho total de la frase para centrarla
-            ancho_total = 0
-            surfs_letras = []
-            for i, char in enumerate(texto_titulo):
-                color = colores_mp[i % len(colores_mp)]
-                surf_c = fuente_grande.render(char, True, color)
-                surfs_letras.append((char, surf_c))
-                ancho_total += surf_c.get_width()
-                
-            x_cursor = (Config.ANCHO - ancho_total) // 2
-            base_y = Config.ALTO // 2 - 90
-            
-            for i, (char, surf_c) in enumerate(surfs_letras):
-                # Calcular el desplazamiento vertical individual (onda de Mario Party)
-                y_wave = math.sin(t * 0.007 + i * 0.4) * 18
-                pos_y = base_y + y_wave
-                
-                # Sombra de la letra
-                surf_shadow = fuente_grande.render(char, True, Config.NEGRO)
-                self.pantalla.blit(surf_shadow, (x_cursor + 4, pos_y + 4))
-                # Letra original coloreada
-                self.pantalla.blit(surf_c, (x_cursor, pos_y))
-                
-                x_cursor += surf_c.get_width()
-                
-            # REMAKE parpadeante
-            txt_remake = self.fuente_titulo.render("REMAKE", True, Config.BLANCO)
-            if (t // 300) % 2 == 0:
-                txt_remake = self.fuente_titulo.render("REMAKE", True, Config.AMARILLO)
-            rect_remake = txt_remake.get_rect(center=(Config.ANCHO // 2, base_y + 90))
-            
-            shadow_remake = self.fuente_titulo.render("REMAKE", True, Config.NEGRO)
-            rect_shadow_remake = shadow_remake.get_rect(center=(Config.ANCHO // 2 + 2, base_y + 90 + 2))
-            
-            self.pantalla.blit(shadow_remake, rect_shadow_remake)
-            self.pantalla.blit(txt_remake, rect_remake)
+            # --- TÍTULO ESTILO MARIO PARTY EN PANTALLA DE INICIO ---
+            self.dibujar_titulo_animado("CHEEP CHEEP CHANCE", "REMAKE", base_y=Config.ALTO // 2 - 80, tamano_titulo=62, tamano_sub=36)
             
             # Mensaje pulsante
             alpha_pulsante = int(127 + 128 * math.sin(t * 0.005))
@@ -1466,9 +1767,8 @@ class ManejadorJuego:
             capa_oscura.fill((10, 20, 40, 160))
             self.pantalla.blit(capa_oscura, (0, 0))
             
-            txt = self.fuente_titulo.render("CHEEP CHEEP CHANCE REMAKE", True, Config.AMARILLO)
-            rect_txt = txt.get_rect(center=(Config.ANCHO // 2, 120))
-            self.pantalla.blit(txt, rect_txt)
+            # --- TÍTULO ANIMADO CON EFECTO MARIO PARTY EN MENÚ PRINCIPAL ---
+            self.dibujar_titulo_animado("CHEEP CHEEP CHANCE", "REMAKE", base_y=110, tamano_titulo=54, tamano_sub=30)
             
             self.btn_jugar.dibujar(self.pantalla)
             self.btn_opciones.dibujar(self.pantalla)
@@ -1483,6 +1783,8 @@ class ManejadorJuego:
             capa_oscura.fill((10, 20, 40, 160))
             self.pantalla.blit(capa_oscura, (0, 0))
             
+            txt_shadow = self.fuente_titulo.render("SELECCIONA UN MODO", True, Config.NEGRO)
+            self.pantalla.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 123)))
             txt = self.fuente_titulo.render("SELECCIONA UN MODO", True, Config.AMARILLO)
             rect_txt = txt.get_rect(center=(Config.ANCHO // 2, 120))
             self.pantalla.blit(txt, rect_txt)
@@ -1497,6 +1799,8 @@ class ManejadorJuego:
             capa_oscura.fill((10, 20, 40, 160))
             self.pantalla.blit(capa_oscura, (0, 0))
             
+            txt_shadow = self.fuente_titulo.render("¿CUÁNTOS JUGADORES?", True, Config.NEGRO)
+            self.pantalla.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 123)))
             txt = self.fuente_titulo.render("¿CUÁNTOS JUGADORES?", True, Config.AMARILLO)
             rect_txt = txt.get_rect(center=(Config.ANCHO // 2, 120))
             self.pantalla.blit(txt, rect_txt)
@@ -1664,70 +1968,89 @@ class ManejadorJuego:
             capa_oscura.fill((10, 20, 40, 200))
             self.pantalla.blit(capa_oscura, (0, 0))
             
-            txt = self.fuente_titulo.render("OPCIONES Y CONTROLES", True, Config.AMARILLO)
+            txt_shadow = self.fuente_titulo.render("OPCIONES", True, Config.NEGRO)
+            self.pantalla.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 83)))
+            txt = self.fuente_titulo.render("OPCIONES", True, Config.AMARILLO)
             rect_txt = txt.get_rect(center=(Config.ANCHO // 2, 80))
             self.pantalla.blit(txt, rect_txt)
             
             self.btn_toggle_musica.dibujar(self.pantalla)
-            self.btn_toggle_sfx.dibujar(self.pantalla)
             self.slider_musica.draw(self.pantalla, self.fuente_ui)
+            self.btn_toggle_sfx.dibujar(self.pantalla)
             self.slider_sfx.draw(self.pantalla, self.fuente_ui)
-            self.btn_reset_scores.dibujar(self.pantalla)
             self.btn_volver.dibujar(self.pantalla)
-            
-            txt_controles = self.fuente_subtitulo.render("--- CONTROLES ---", True, Config.AMARILLO)
-            self.pantalla.blit(txt_controles, txt_controles.get_rect(center=(Config.ANCHO // 2, 500)))
-            
-            txt_teclas = self.fuente_ui.render("Teclas del 1 al 8 o CLIC del mouse: Seleccionar cuerda", True, Config.BLANCO)
-            self.pantalla.blit(txt_teclas, txt_teclas.get_rect(center=(Config.ANCHO // 2, 530)))
-            
-            txt_escape = self.fuente_ui.render("Tecla ESC: Pausar partida o volver atrás", True, Config.BLANCO)
-            self.pantalla.blit(txt_escape, txt_escape.get_rect(center=(Config.ANCHO // 2, 558)))
             
         elif self.estado == "INSTRUCCIONES":
             capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
-            capa_oscura.fill((10, 20, 40, 200))
+            capa_oscura.fill((10, 20, 40, 215))
             self.pantalla.blit(capa_oscura, (0, 0))
             
+            txt_shadow = self.fuente_titulo.render("INSTRUCCIONES", True, Config.NEGRO)
+            self.pantalla.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 53)))
             txt = self.fuente_titulo.render("INSTRUCCIONES", True, Config.AMARILLO)
-            self.pantalla.blit(txt, txt.get_rect(center=(Config.ANCHO // 2, 70)))
+            self.pantalla.blit(txt, txt.get_rect(center=(Config.ANCHO // 2, 50)))
             
             lineas = [
-                "Cada jugador elige un personaje y, por turnos, una cuerda.",
-                "Al final de la ronda se revela qué había en cada cuerda.",
-                "¡Cuidado! Si eliges una cuerda con un monstruo, quedas ELIMINADO.",
-                "Si eliges una cuerda con un pez bueno, sigues en juego.",
-                "Gana quien quede vivo al final de la partida.",
-                "",
-                "--- CONTROLES ---",
-                "Flechas o WASD: moverte entre botones y personajes",
-                "Teclas del 1 al 8 o CLIC del mouse: elegir una cuerda",
-                "ENTER o ESPACIO: confirmar la opción resaltada",
-                "Tecla ESC: pausar la partida o volver atrás",
+                "• Cada jugador elige un personaje y, por turnos, una cuerda.",
+                "• Al final de la ronda se revela el contenido de cada cuerda.",
+                "• ¡Cuidado! Si eliges una cuerda con monstruo, quedas ELIMINADO.",
+                "• Gana la partida el último jugador que quede con vida.",
             ]
-            
-            y_linea = 140
+            y_linea = 105
             for linea in lineas:
-                if linea == "--- CONTROLES ---":
-                    color_linea = Config.AMARILLO
-                    fuente_linea = self.fuente_subtitulo
-                elif linea == "":
-                    y_linea += 20
-                    continue
-                else:
-                    color_linea = Config.BLANCO
-                    fuente_linea = self.fuente_ui
-                txt_linea = fuente_linea.render(linea, True, color_linea)
-                self.pantalla.blit(txt_linea, txt_linea.get_rect(center=(Config.ANCHO // 2, y_linea)))
-                y_linea += 36
-            
+                txt_l = self.fuente_ui.render(linea, True, Config.BLANCO)
+                self.pantalla.blit(txt_l, txt_l.get_rect(center=(Config.ANCHO // 2, y_linea)))
+                y_linea += 28
+
+            txt_sub_shadow = self.fuente_subtitulo.render("--- CONTROLES Y MANDOS ---", True, Config.NEGRO)
+            self.pantalla.blit(txt_sub_shadow, txt_sub_shadow.get_rect(center=(Config.ANCHO // 2 + 2, 237)))
+            txt_sub = self.fuente_subtitulo.render("--- CONTROLES Y MANDOS ---", True, Config.AMARILLO)
+            self.pantalla.blit(txt_sub, txt_sub.get_rect(center=(Config.ANCHO // 2, 235)))
+
+            # TARJETA 1: Movimiento y Navegación (WASD + Flechas)
+            card1_rect = pygame.Rect(100, 270, 520, 280)
+            pygame.draw.rect(self.pantalla, (15, 25, 45, 220), card1_rect, border_radius=12)
+            pygame.draw.rect(self.pantalla, Config.AMARILLO, card1_rect, width=2, border_radius=12)
+
+            txt_c1 = self.fuente_subtitulo.render("Navegación / Movimiento", True, Config.AMARILLO)
+            self.pantalla.blit(txt_c1, txt_c1.get_rect(center=(card1_rect.centerx, card1_rect.top + 25)))
+
+            if self.img_ctrl_wasd:
+                r_wasd = self.img_ctrl_wasd.get_rect(center=(card1_rect.centerx - 110, card1_rect.top + 115))
+                self.pantalla.blit(self.img_ctrl_wasd, r_wasd)
+            if self.img_ctrl_arrow:
+                r_arr = self.img_ctrl_arrow.get_rect(center=(card1_rect.centerx + 110, card1_rect.top + 115))
+                self.pantalla.blit(self.img_ctrl_arrow, r_arr)
+
+            t_desc1 = self.fuente_ui.render("WASD o Flechas de Dirección", True, Config.BLANCO)
+            self.pantalla.blit(t_desc1, t_desc1.get_rect(center=(card1_rect.centerx, card1_rect.top + 195)))
+            t_subdesc1 = self.fuente_ui.render("Moverse entre opciones y personajes", True, Config.GRIS_CLARO)
+            self.pantalla.blit(t_subdesc1, t_subdesc1.get_rect(center=(card1_rect.centerx, card1_rect.top + 225)))
+
+            # TARJETA 2: Interacción y Cuerdas (Mouse + Teclas 1-8 / ENTER / ESC)
+            card2_rect = pygame.Rect(660, 270, 520, 280)
+            pygame.draw.rect(self.pantalla, (15, 25, 45, 220), card2_rect, border_radius=12)
+            pygame.draw.rect(self.pantalla, Config.AMARILLO, card2_rect, width=2, border_radius=12)
+
+            txt_c2 = self.fuente_subtitulo.render("Interacción y Cuerdas", True, Config.AMARILLO)
+            self.pantalla.blit(txt_c2, txt_c2.get_rect(center=(card2_rect.centerx, card2_rect.top + 25)))
+
+            if self.img_ctrl_mouse:
+                r_mouse = self.img_ctrl_mouse.get_rect(center=(card2_rect.centerx, card2_rect.top + 115))
+                self.pantalla.blit(self.img_ctrl_mouse, r_mouse)
+
+            t_desc2 = self.fuente_ui.render("Clic del Mouse o Teclas del 1 al 8", True, Config.BLANCO)
+            self.pantalla.blit(t_desc2, t_desc2.get_rect(center=(card2_rect.centerx, card2_rect.top + 195)))
+            t_subdesc2 = self.fuente_ui.render("Elegir cuerda | ENTER: Confirmar | ESC: Pausa", True, Config.GRIS_CLARO)
+            self.pantalla.blit(t_subdesc2, t_subdesc2.get_rect(center=(card2_rect.centerx, card2_rect.top + 225)))
+
             self.btn_instrucciones_volver.dibujar(self.pantalla)
             
         elif self.estado in ["EN_JUEGO", "PAUSA", "FIN_JUEGO", "REVELANDO_CUERDAS", "ESPERA_POST_SELECCION"]:
-            pygame.draw.ellipse(self.pantalla, Config.ROJO, (Config.SALV_X, Config.SALV_Y, Config.SALV_ANCHO, Config.SALV_ALTO))
-            pygame.draw.ellipse(self.pantalla, Config.CELESTE_CIELO, (Config.SALV_X + 20, Config.SALV_Y + 6, Config.SALV_ANCHO - 40, Config.SALV_ALTO - 12))
+            self.dibujar_plataforma_modular()
             
             self.pantalla.blit(self.tinte_agua, (0, Config.NIVEL_AGUA))
+            self.dibujar_estela_flotacion_agua()
             self.dibujar_fondo_marino()
             
             for c in self.criaturas:
@@ -1743,7 +2066,8 @@ class ManejadorJuego:
                 en_proceso = idx in self.cuerdas_reveladas_indices
                 c.dibujar(self.pantalla, self.revelado, en_proceso=en_proceso, resaltada=(idx == self.cuerda_resaltada))
             
-            for j in self.jugadores: 
+            jugadores_ordenados = sorted(self.jugadores, key=lambda p: p.y)
+            for j in jugadores_ordenados: 
                 j.dibujar(self.pantalla)
             
             vivos_iniciales = [j for j in self.jugadores if j.vivo]
@@ -1805,23 +2129,52 @@ class ManejadorJuego:
                 self.pantalla.blit(txt_sel, (panel_x + 15, panel_y + 64 + idx_j * fila_alto))
 
 
+            # --- HUD SUPERIOR: MODO / MARCADOR (TEXTO LIMPIO SIN BURBUJA) ---
             if self.modo_actual == "DUELO":
-                tag = f"MODO DUELO | MARCADOR: {self.victorias_j1} - {self.victorias_j2}"
-                if self.muerte_subita_activa: tag += " [¡MUERTE SÚBITA!]"
+                tag = f"DUELO | MARCADOR {self.victorias_j1} - {self.victorias_j2}"
+                if self.muerte_subita_activa: tag += " (M. SÚBITA)"
             else:
-                tag = "MODO: MUERTE SÚBITA" if self.muerte_subita_activa else f"RONDA: {self.num_ronda}"
+                tag = "MUERTE SÚBITA" if self.muerte_subita_activa else f"RONDA {self.num_ronda}"
                 
-            self.pantalla.blit(self.fuente_panel.render(tag, True, Config.ROJO if self.muerte_subita_activa else Config.NEGRO), (20, 20))
+            color_tag = Config.AMARILLO if self.modo_actual == "DUELO" else Config.BLANCO
+            txt_tag_shadow = self.fuente_hud_banner.render(tag, True, Config.NEGRO)
+            txt_tag = self.fuente_hud_banner.render(tag, True, color_tag)
+            
+            rect_tag = txt_tag.get_rect(topleft=(25, 18))
+            rect_tag_shadow = txt_tag_shadow.get_rect(topleft=(27, 20))
+            self.pantalla.blit(txt_tag_shadow, rect_tag_shadow)
+            self.pantalla.blit(txt_tag, rect_tag)
 
+            # --- ANUNCIO DE FASES / TURNOS (TEXTO MÁS GRANDE Y MÁS BAJO SIN BURBUJA) ---
+            ahora_ms = pygame.time.get_ticks()
+            bamboleo_y = 0
+            
             if self.turno_actual < len(vivos_iniciales) and not self.revelado:
                 j_act = vivos_iniciales[self.turno_actual]
-                txt_b = self.fuente_panel.render(f"Turno de: {j_act.nombre} | Tiempo: {self.segundos_restantes}s", True, Config.ROJO if self.segundos_restantes <= 2 else Config.NEGRO)
+                txt_b_str = f"Turno de: {j_act.nombre}  |  Tiempo: {self.segundos_restantes}s"
+                color_txt_b = (255, 100, 100) if self.segundos_restantes <= 2 else Config.AMARILLO
             elif not self.revelado and (self.turno_actual >= len(vivos_iniciales) or self.estado == "ESPERA_POST_SELECCION"):
-                txt_b = self.fuente_panel.render("¡SELECCIÓN COMPLETADA! PREPARANDO REVELACIÓN...", True, Config.VERDE)
+                txt_b_str = "¡SELECCIÓN COMPLETADA! PREPARANDO REVELACIÓN..."
+                color_txt_b = (100, 255, 160)
             else:
-                txt_b = self.fuente_panel.render(self.mensaje_partida, True, Config.ROJO_OSCURO if self.revelado else Config.VERDE)
+                txt_b_str = self.mensaje_partida
+                bamboleo_y = int(math.sin(ahora_ms * 0.007) * 4)
+                pulso_c = int(math.sin(ahora_ms * 0.009) * 35)
+                g_val = max(180, min(255, 220 + pulso_c))
+                color_txt_b = (255, g_val, 80) if self.revelado else (100, 255, 160)
             
-            self.pantalla.blit(txt_b, txt_b.get_rect(center=(Config.ANCHO // 2, 28)))
+            # Posición más baja en pantalla (Y = 65) con fuente grande (34px) y sin contenedor de fondo
+            target_center_x = max(rect_tag.right + 180, Config.ANCHO // 2 + 50)
+            target_center_y = 65 + bamboleo_y
+
+            txt_b_shadow = self.fuente_fases_grandes.render(txt_b_str, True, Config.NEGRO)
+            txt_b = self.fuente_fases_grandes.render(txt_b_str, True, color_txt_b)
+            
+            rect_b = txt_b.get_rect(center=(target_center_x, target_center_y))
+            rect_b_shadow = txt_b_shadow.get_rect(center=(target_center_x + 2, target_center_y + 2))
+            
+            self.pantalla.blit(txt_b_shadow, rect_b_shadow)
+            self.pantalla.blit(txt_b, rect_b)
             
             # --- OVERLAY DE PAUSA ---
             if self.estado == "PAUSA":
@@ -1838,28 +2191,67 @@ class ManejadorJuego:
             # --- OVERLAY DE FIN DE JUEGO ---
             elif self.estado == "FIN_JUEGO":
                 capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
-                capa_oscura.fill((15, 20, 30, 220))
+                capa_oscura.fill((15, 20, 30, 225))
                 self.pantalla.blit(capa_oscura, (0, 0))
                 
+                txt_fin_shadow = self.fuente_titulo.render("PARTIDA FINALIZADA", True, Config.NEGRO)
+                self.pantalla.blit(txt_fin_shadow, txt_fin_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 153)))
                 txt_fin = self.fuente_titulo.render("PARTIDA FINALIZADA", True, Config.AMARILLO)
-                rect_fin = txt_fin.get_rect(center=(Config.ANCHO // 2, 180))
+                rect_fin = txt_fin.get_rect(center=(Config.ANCHO // 2, 150))
                 self.pantalla.blit(txt_fin, rect_fin)
                 
                 if self.modo_actual == "DUELO":
-                    texto_final_limpio = f"¡GANADOR DEFINITIVO: {self.jugadores[0].nombre if self.victorias_j1 == 2 else self.jugadores[1].nombre}!"
+                    ganador_obj = self.jugadores[0] if self.victorias_j1 == 2 else self.jugadores[1]
+                    texto_final_limpio = f"¡GANADOR DEFINITIVO: {ganador_obj.nombre}!"
+                    color_ganador = Jugador.COLORES_NOMBRE.get(ganador_obj.personaje, Config.AMARILLO)
                 else:
                     ganador_real = [j for j in self.jugadores if j.vivo]
-                    texto_final_limpio = f"¡GANADOR: {ganador_real[0].nombre}!" if len(ganador_real) == 1 else "¡NADIE SOBREVIVIÓ!"
+                    if len(ganador_real) == 1:
+                        ganador_obj = ganador_real[0]
+                        texto_final_limpio = f"¡GANADOR: {ganador_obj.nombre}!"
+                        color_ganador = Jugador.COLORES_NOMBRE.get(ganador_obj.personaje, Config.AMARILLO)
+                    else:
+                        texto_final_limpio = "¡NADIE SOBREVIVIÓ!"
+                        color_ganador = (255, 110, 110)
                     
-                txt_res = self.fuente_subtitulo.render(texto_final_limpio, True, Config.BLANCO)
-                self.pantalla.blit(txt_res, txt_res.get_rect(center=(Config.ANCHO // 2, 250)))
+                fuente_ganador = pygame.font.Font(Config.FUENTE_PRINCIPAL, 38)
+                
+                txt_res_shadow = fuente_ganador.render(texto_final_limpio, True, Config.NEGRO)
+                txt_res = fuente_ganador.render(texto_final_limpio, True, color_ganador)
+                
+                rect_res = txt_res.get_rect(center=(Config.ANCHO // 2, 245))
+                rect_res_shadow = txt_res_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 248))
+                
+                self.pantalla.blit(txt_res_shadow, rect_res_shadow)
+                self.pantalla.blit(txt_res, rect_res)
                 
                 self.btn_reiniciar.dibujar(self.pantalla)
                 self.btn_fin_menu.dibujar(self.pantalla)
 
         if self.mostrar_debug_fps:
             fps_reales = int(self.reloj.get_fps())
-            txt_fps = self.fuente_fps.render(f"FPS: {fps_reales} / {Config.FPS}", True, Config.AMARILLO)
-            self.pantalla.blit(txt_fps, (15, Config.ALTO - 30))
+            txt_fps = self.fuente_fps.render(f"FPS: {fps_reales} / {Config.FPS}", True, Config.NEGRO)
+            rect_fps = txt_fps.get_rect(topright=(Config.ANCHO - 18, 14))
             
+            # Fondo traslúcido para legibilidad perfecta del contador en color negro en la esquina superior derecha
+            bg_fps = rect_fps.inflate(16, 8)
+            pygame.draw.rect(self.pantalla, (255, 255, 255, 220), bg_fps, border_radius=6)
+            pygame.draw.rect(self.pantalla, Config.NEGRO, bg_fps, width=2, border_radius=6)
+            
+            self.pantalla.blit(txt_fps, rect_fps)
+            
+        # Banner flotante de notificación F1 (MUTE / UNMUTE) durante 2 segundos
+        ahora_ms = pygame.time.get_ticks()
+        if ahora_ms - self.mensaje_mute_tiempo < 2000 and self.mensaje_mute_texto:
+            txt_mute = self.fuente_hud_banner.render(self.mensaje_mute_texto, True, Config.BLANCO)
+            rect_mute = txt_mute.get_rect(topright=(Config.ANCHO - 25, 15 if not self.mostrar_debug_fps else 45))
+            badge_mute = rect_mute.inflate(20, 10)
+            
+            surf_mute = pygame.Surface((badge_mute.width, badge_mute.height), pygame.SRCALPHA)
+            color_bg = (180, 30, 30, 220) if "SILENCIADO" in self.mensaje_mute_texto else (30, 140, 50, 220)
+            surf_mute.fill(color_bg)
+            self.pantalla.blit(surf_mute, badge_mute.topleft)
+            pygame.draw.rect(self.pantalla, Config.BLANCO, badge_mute, width=2, border_radius=6)
+            self.pantalla.blit(txt_mute, rect_mute)
+
         pygame.display.flip()
