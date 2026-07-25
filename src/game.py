@@ -595,26 +595,47 @@ class ManejadorJuego:
         """Reproduce la pista de música real indicada ('menu', 'game' o 'duel')."""
         if not Config.musica_activa:
             return
+        if hasattr(self, '_pista_actual') and self._pista_actual == pista:
+            return
+        
         archivos_musica = {
-            "menu": "music_menu.mp3",
-            "game": "music_game.mp3",
-            "duel": "music_duel.mp3",
+            "menu": ["music_menu.mp3", "music_menu2.mp3", "music_menu3.mp3"],
+            "game": ["music_game.mp3", "music_game2.mp3", "music_game3.mp3"],
+            "duel": ["music_duel.mp3", "music_duel1.mp3", "music_duel2.mp3", "music_duel3.mp3"],
         }
+
         if pista not in archivos_musica:
             return
-        if self._pista_actual == pista:
-            return
-        ruta = Config.RUTA_SONIDOS / archivos_musica[pista]
+        
+        pistas= archivos_musica[pista]
+
         try:
-            pygame.mixer.music.load(str(ruta))
-            mult = 0.45 if pista in ("game", "duel") else 1.0
-            pygame.mixer.music.set_volume(Config.volumen_musica * mult)
-            pygame.mixer.music.play(loops=-1)
+            if isinstance (pistas, list):
+                self.lista_actual = pistas
+                #self.indice_cancion_actual = 0
+                self.indice_cancion_actual = random.randint(0, len(self.lista_actual) - 1)
+                
+                pygame.mixer.music.set_endevent(pygame.USEREVENT + 1)
+
+                primera = Config.RUTA_SONIDOS / self.lista_actual[self.indice_cancion_actual]
+                pygame.mixer.music.load(str(primera))
+                pygame.mixer.music.set_volume(Config.volumen_musica)
+                pygame.mixer.music.play()
+
+            else: 
+                pygame.mixer.music.set_endevent()
+                ruta = Config.RUTA_SONIDOS / pistas 
+                pygame.mixer.music.load(str(ruta))
+                pygame.mixer.music.set_volume(Config.volumen_musica)
+                pygame.mixer.music.play(loops=-1)
+
             self._pista_actual = pista
+
         except Exception as e:
             print(f"No se pudo cargar la música '{pista}': {e}")
 
     def detener_musica(self):
+        pygame.mixer.music.set_endevent()
         pygame.mixer.music.stop()
         self._pista_actual = None
 
@@ -1296,6 +1317,15 @@ class ManejadorJuego:
                     Config.volumen_sfx = self.slider_sfx.value
                     self.aplicar_volumen_sfx()
 
+            if evento.type == pygame.USEREVENT + 1:
+                if Config.musica_activa and hasattr(self, 'lista_actual') and self.lista_actual:
+                    self.indice_cancion_actual = (self.indice_cancion_actual + 1) % len(self.lista_actual)
+                    siguiente = Config.RUTA_SONIDOS / self.lista_actual[self.indice_cancion_actual]
+            
+                    pygame.mixer.music.load(str(siguiente))
+                    pygame.mixer.music.set_volume(Config.volumen_musica)
+                    pygame.mixer.music.play()
+                    
             teclas_reservadas = (
                 pygame.K_ESCAPE, pygame.K_F1, pygame.K_F2, pygame.K_F3, pygame.K_F4,
                 pygame.K_F5, pygame.K_F6, pygame.K_F7, pygame.K_F8, pygame.K_F9,
