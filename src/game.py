@@ -4,6 +4,9 @@ import math
 import sys
 from src.config import *
 from src.entity import *
+from src.ui import Boton, Slider
+from src.audio import GestorAudio
+from src.renderer import RenderizadorEscenario
 
 # Aseguramos la inicialización de Pygame y su mixer
 pygame.init()
@@ -17,11 +20,29 @@ class ManejadorJuego:
         self.pantalla = pantalla
         self.reloj = pygame.time.Clock()
         self.ejecutando = True
+        self.renderer = RenderizadorEscenario(self.pantalla)
         
         # --- ESTADO INICIAL ---
         # Se inicia en la Pantalla de Título parpadeante con música chiptune
         self.estado = "PANTALLA_TITULO"
         self.estado_previo_opciones = "MENU_PRINCIPAL"
+        
+        # --- GESTOR DE AUDIO MODULARIZADO ---
+        self.audio = GestorAudio()
+        self.snd_click = self.audio.snd_click
+        self.snd_seleccion = self.audio.snd_seleccion
+        self.snd_alerta = self.audio.snd_alerta
+        self.snd_victoria = self.audio.snd_victoria
+        self.snd_empate = self.audio.snd_empate #Domingo 26/07: Nuevo sonido añadido
+        self.snd_derrota = self.audio.snd_derrota
+        self.snd_pausa = self.audio.snd_pausa
+        self.snd_reanudar = self.audio.snd_reanudar
+        self.snd_salir = self.audio.snd_salir
+        self.snd_pez = self.audio.snd_pez
+        self.snd_splash = self.audio.snd_splash
+        self.snd_tension = self.audio.snd_tension
+        self.canal_tension = None
+        self.snd_kamek = self.audio.snd_kamek
         
         # Sistema de debug / FPS
         self.mostrar_debug_fps = False
@@ -29,7 +50,7 @@ class ManejadorJuego:
         # --- FUENTES EN MEMORIA ---
         self.fuente_titulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 44)
         self.fuente_pausa = pygame.font.Font(Config.FUENTE_PRINCIPAL, 48)
-        self.fuente_subtitulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 24)
+        self.fuente_subtitulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 36)
         self.fuente_ui = pygame.font.Font(Config.FUENTE_PRINCIPAL, 20)
         self.fuente_fps = pygame.font.Font(Config.FUENTE_PRINCIPAL, 18)
         # Fuente más grande para el panel lateral y banner HUD de partida
@@ -37,8 +58,7 @@ class ManejadorJuego:
         self.fuente_hud_banner = pygame.font.Font(Config.FUENTE_PRINCIPAL, 28)
         self.fuente_fases_grandes = pygame.font.Font(Config.FUENTE_PRINCIPAL, 34)
         
-        # --- CARGAR SONIDOS SINTETIZADOS RETRO Y MÚSICA DE FONDO ---
-        self.cargar_sonidos()
+        # --- REPRODUCCIÓN DE MÚSICA DE FONDO Y GESTOR DE AUDIO ---
         self.reproducir_musica()
         
         # --- CARGAR FONDOS DE PANTALLA DUALES (SUPERFICIE Y SUBMARINO) ---
@@ -89,10 +109,25 @@ class ManejadorJuego:
             except Exception as e:
                 print(f"Error cargando textura de borde: {e}")
 
-        # --- CARGAR FONDO ANIMADO GIF (STARS) ---
-        self.frames_stars = self.cargar_gif_animado(str(Config.RUTA_IMAGENES / "stars.gif"))
+        # --- CARGAR SECUENCIA ANIMADA MAINFRAME DE FONDO ---
+        self.frames_stars = []
         self.indice_frame_stars = 0
         self.ultimo_tiempo_frame_stars = 0
+        if Config.RUTA_IMAGENES.exists():
+            archivos_mf = sorted(
+                [f for f in Config.RUTA_IMAGENES.iterdir() if f.is_file() and f.name.lower().startswith("mainframe_") and f.name.lower().endswith((".png", ".jpg", ".jpeg"))],
+                key=lambda x: int(''.join(filter(str.isdigit, x.stem)) or 0)
+            )
+            for f_path in archivos_mf:
+                try:
+                    img = pygame.image.load(str(f_path)).convert()
+                    img = pygame.transform.scale(img, (Config.ANCHO, Config.ALTO))
+                    self.frames_stars.append(img)
+                except Exception as e:
+                    print(f"Error cargando frame {f_path.name}: {e}")
+            if self.frames_stars:
+                print(f"Secuencia animada mainframe cargada: {len(self.frames_stars)} frames.")
+
 
         # --- CARGAR ICONO DE KAMEK ---
         self.sprite_kamek = None
@@ -108,6 +143,18 @@ class ManejadorJuego:
                 self.sprite_kamek = pygame.transform.scale(self.sprite_kamek, (100, 100))
             except Exception as e:
                 print(f"Error cargando icono de Kamek: {e}")
+
+        # --- BOTÓN DE KAMEK PARA NAVEGACIÓN Y MANO INDICADORA ---
+        self.btn_kamek = Boton(Config.ANCHO - 120, Config.ALTO - 120, 100, 100, "", (0, 0, 0, 0), (0, 0, 0, 0))
+        if self.sprite_kamek:
+            self.btn_kamek.tex_normal = self.sprite_kamek
+            self.btn_kamek.tex_selected = self.sprite_kamek
+        if Boton._tex_hand_raw:
+            alto_mano = int(52 * 0.85)
+            ancho_mano = int(Boton._tex_hand_raw.get_width() * (alto_mano / Boton._tex_hand_raw.get_height()))
+            self.btn_kamek.hand_img = pygame.transform.scale(Boton._tex_hand_raw, (ancho_mano, alto_mano))
+
+
 
         # --- CORRECCIÓN DE BUG DE RENDIMIENTO ---
         # Antes, la pantalla "MENU_SELECCION_PERSONAJES" cargaba y reescalaba
@@ -186,6 +233,27 @@ class ManejadorJuego:
         # Distribuir algas sobre la resolución 1280
         self.algas_x = [80, 220, 380, 540, 700, 860, 1020, 1180]
 
+        # --- CACHÉ DE SUPERFICIES Y OVERLAYS (OPTIMIZACIÓN DE MEMORIA / FPS) ---
+        self._overlay_pausa = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
+        self._overlay_pausa.fill((0, 0, 0, 160))
+
+        self._overlay_fin_juego = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
+        self._overlay_fin_juego.fill((15, 20, 30, 225))
+
+        self._overlay_opciones = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
+        self._overlay_opciones.fill((10, 20, 40, 200))
+
+        self._overlay_instrucciones = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
+        self._overlay_instrucciones.fill((10, 20, 40, 215))
+
+        self._burbujas_cache = {}
+        for factor in [1, 2, 3, 4]:
+            r_int = max(2, int(factor * 3))
+            surf_b = pygame.Surface((r_int * 2 + 4, r_int * 2 + 4), pygame.SRCALPHA)
+            pygame.draw.circle(surf_b, (255, 255, 255, 150), (r_int + 2, r_int + 2), r_int, 1)
+            pygame.draw.circle(surf_b, (200, 240, 255, 60), (r_int + 2, r_int + 2), max(1, r_int - 1))
+            self._burbujas_cache[factor] = surf_b
+
         # --- BOTONES DINÁMICAMENTE CENTRADOS ---
         btn_w = 340
         btn_h = 52
@@ -197,8 +265,9 @@ class ManejadorJuego:
         self.btn_instrucciones = Boton(cx, 390, btn_w, btn_h, "INSTRUCCIONES", Config.AMARILLO, Config.VERDE_REMANSO)
         self.btn_salir = Boton(cx, 455, btn_w, btn_h, "VOLVER AL LAUNCHER", Config.ROJO, Config.ROJO_OSCURO)
 
-        # --- BOTÓN: VOLVER DE LA PANTALLA DE INSTRUCCIONES ---
+        # --- BOTÓN: VOLVER DE LA PANTALLA DE INSTRUCCIONES / CRÉDITOS ---
         self.btn_instrucciones_volver = Boton(cx, 630, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
+        self.btn_creditos_volver = Boton(cx, 630, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
         
         # --- BOTONES: MENÚ DE SELECCIÓN DE MODOS ---
         self.btn_vs_cpu = Boton(cx, 260, btn_w, btn_h, "VS CPU (1 VS 3)", Config.VERDE, Config.VERDE_REMANSO)
@@ -290,6 +359,8 @@ class ManejadorJuego:
         self.mensaje_mute_tiempo = 0
         self.mensaje_mute_texto = ""
 
+
+
     # --- CARGAR GIF CON PILLOW ---
     def cargar_gif_animado(self, ruta_gif):
         try:
@@ -312,347 +383,52 @@ class ManejadorJuego:
             print(f"Error cargando GIF animado {ruta_gif}: {e}")
             return []
 
-    # --- SÍNTESIS DE SONIDOS RETRO ---
-    def generar_sonido_sintetico(self, frecuencia, duracion, tipo="sine", volumen=0.08):
-        if not pygame.mixer.get_init():
-            return None
-        try:
-            import array
-            import math
-            sample_rate = 22050
-            num_muestras = int(sample_rate * duracion)
-            datos = array.array('h')
-            for i in range(num_muestras):
-                t = i / sample_rate
-                if tipo == "sine":
-                    val = math.sin(2 * math.pi * frecuencia * t)
-                elif tipo == "square":
-                    val = 1.0 if math.sin(2 * math.pi * frecuencia * t) >= 0 else -1.0
-                elif tipo == "triangle":
-                    val = 2.0 * abs(2.0 * (t * frecuencia - math.floor(t * frecuencia + 0.5))) - 1.0
-                else:
-                    val = math.sin(2 * math.pi * frecuencia * t)
-                
-                if i < 100:
-                    val *= (i / 100)
-                elif i > num_muestras - 100:
-                    val *= ((num_muestras - i) / 100)
-                    
-                val_int = int(val * 32767 * volumen)
-                val_int = max(-32768, min(32767, val_int))
-                datos.append(val_int)
-            return pygame.mixer.Sound(buffer=datos.tobytes())
-        except Exception as e:
-            print(f"Error generando sonido: {e}")
-            return None
+    # --- DELEGADORES DE RENDERIZADO AL RENDERIZADOR (src/renderer.py) ---
+    def dibujar_plataforma_modular(self):
+        self.renderer.dibujar_plataforma_modular(self.sprite_platform, self.sprite_border_texture)
 
-    def generar_sonido_splash(self):
-        if not pygame.mixer.get_init():
-            return None
-        try:
-            import array
-            import random
-            sample_rate = 22050
-            duracion = 0.5
-            num_muestras = int(sample_rate * duracion)
-            datos = array.array('h')
-            for i in range(num_muestras):
-                progreso = i / num_muestras
-                val = (random.random() * 2.0 - 1.0) * (1.0 - progreso)
-                val_int = int(val * 32767 * 0.15)
-                val_int = max(-32768, min(32767, val_int))
-                datos.append(val_int)
-            return pygame.mixer.Sound(buffer=datos.tobytes())
-        except Exception as e:
-            print(f"Error generando splash sound: {e}")
-            return None
+    def dibujar_fondo_marino(self):
+        self.renderer.dibujar_fondo_marino(self.algas_x)
 
-    def generar_sonido_victoria(self):
-        if not pygame.mixer.get_init():
-            return None
-        try:
-            import array
-            import math
-            sample_rate = 22050
-            notas = [523.25, 659.25, 783.99, 1046.50]
-            dur_nota = 0.12
-            muestras_por_nota = int(sample_rate * dur_nota)
-            datos = array.array('h')
-            for f in notas:
-                for i in range(muestras_por_nota):
-                    t = i / sample_rate
-                    val = math.sin(2 * math.pi * f * t)
-                    if i < 100:
-                        val *= (i / 100)
-                    elif i > muestras_por_nota - 100:
-                        val *= ((muestras_por_nota - i) / 100)
-                    val_int = int(val * 32767 * 0.08)
-                    val_int = max(-32768, min(32767, val_int))
-                    datos.append(val_int)
-            return pygame.mixer.Sound(buffer=datos.tobytes())
-        except Exception as e:
-            print(f"Error victoria sound: {e}")
-            return None
+    def dibujar_titulo_animado(self, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110):
+        self.renderer.dibujar_titulo_animado(self.fuente_titulo, self.fuente_subtitulo, texto_titulo, texto_sub, centro_x, base_y)
 
-    def generar_sonido_derrota(self):
-        if not pygame.mixer.get_init():
-            return None
-        try:
-            import array
-            import math
-            sample_rate = 22050
-            notas = [523.25, 392.00, 329.63, 261.63]
-            dur_nota = 0.15
-            muestras_por_nota = int(sample_rate * dur_nota)
-            datos = array.array('h')
-            for f in notas:
-                for i in range(muestras_por_nota):
-                    t = i / sample_rate
-                    val = 0.6 * math.sin(2 * math.pi * f * t) + 0.4 * (1.0 if math.sin(2 * math.pi * f * t) >= 0 else -1.0)
-                    if i < 100:
-                        val *= (i / 100)
-                    elif i > muestras_por_nota - 100:
-                        val *= ((muestras_por_nota - i) / 100)
-                    val_int = int(val * 32767 * 0.08)
-                    val_int = max(-32768, min(32767, val_int))
-                    datos.append(val_int)
-            return pygame.mixer.Sound(buffer=datos.tobytes())
-        except Exception as e:
-            print(f"Error derrota sound: {e}")
-            return None
+    # --- DELEGADORES DE AUDIO AL GESTOR DE AUDIO (src/audio.py) ---
+    def reproducir_sonido(self, sonido, loops=0):
+        return self.audio.reproducir_sonido(sonido, loops=loops)
 
-    def generar_sonido_tension(self):
-        if not pygame.mixer.get_init():
-            return None
-        try:
-            import array
-            import math
-            import random
-            sample_rate = 22050
-            duracion = 1.4
-            num_muestras = int(sample_rate * duracion)
-            datos = array.array('h')
-            for i in range(num_muestras):
-                t = i / sample_rate
-                progreso = i / num_muestras
-                frecuencia = 200 - 90 * progreso
-                tremolo = 0.7 + 0.3 * math.sin(2 * math.pi * 7 * t)
-                ruido = (random.random() * 2.0 - 1.0) * 0.15
-                val = math.sin(2 * math.pi * frecuencia * t) * tremolo + ruido
-                if i < 200:
-                    val *= (i / 200)
-                elif i > num_muestras - 300:
-                    val *= ((num_muestras - i) / 300)
-                val_int = int(val * 32767 * 0.06)
-                val_int = max(-32768, min(32767, val_int))
-                datos.append(val_int)
-            return pygame.mixer.Sound(buffer=datos.tobytes())
-        except Exception as e:
-            print(f"Error generando sonido de tension: {e}")
-            return None
+    def reproducir_musica(self, pista="menu"):
+        self.audio.reproducir_musica(pista)
 
-    def generar_musica_fondo(self):
-        """Sintetiza un bucle de música retro (chiptune) de 8 segundos."""
-        if not pygame.mixer.get_init():
-            return None
-        try:
-            import array
-            import math
-            sample_rate = 22050
-            duracion = 8.0
-            num_muestras = int(sample_rate * duracion)
-            datos = array.array('h', [0] * num_muestras)
-            
-            melodia = [
-                523.25, 659.25, 783.99, 659.25,  # C
-                493.88, 587.33, 783.99, 587.33,  # G
-                440.00, 523.25, 659.25, 523.25,  # Am
-                349.23, 440.00, 523.25, 440.00   # F
-            ]
-            bajo_frecuencias = [130.81, 98.00, 110.00, 87.31] # C3, G2, A2, F2
-            
-            nota_dur = 0.5
-            muestras_nota = int(sample_rate * nota_dur)
-            
-            for tick in range(16):
-                freq_mel = melodia[tick]
-                freq_bajo = bajo_frecuencias[tick // 4]
-                
-                inicio = tick * muestras_nota
-                for i in range(muestras_nota):
-                    idx = inicio + i
-                    if idx >= num_muestras:
-                        break
-                    t = idx / sample_rate
-                    
-                    val_mel = math.sin(2 * math.pi * freq_mel * t)
-                    tf = t * freq_bajo
-                    val_bajo = 2.0 * abs(2.0 * (tf - math.floor(tf + 0.5))) - 1.0
-                    
-                    val_mezcla = (val_mel * 0.05) + (val_bajo * 0.07)
-                    
-                    env = 1.0
-                    if i < 250:
-                        env = i / 250
-                    elif i > muestras_nota - 250:
-                        env = (muestras_nota - i) / 250
-                    
-                    val_mezcla *= env
-                    val_int = int(val_mezcla * 32767)
-                    val_int = max(-32768, min(32767, val_int))
-                    datos[idx] = val_int
-                    
-            return pygame.mixer.Sound(buffer=datos.tobytes())
-        except Exception as e:
-            print(f"Error generando música de fondo: {e}")
-            return None
-
-    def _cargar_sfx_real(self, nombre_archivo, volumen=0.6):
-        """Carga un efecto de sonido real desde assets/sounds. Si falla, retorna None."""
-        ruta = Config.RUTA_SONIDOS / nombre_archivo
-        try:
-            snd = pygame.mixer.Sound(str(ruta))
-            snd.set_volume(volumen)
-            return snd
-        except Exception as e:
-            print(f"No se pudo cargar {nombre_archivo}: {e}")
-            return None
-
-    def cargar_sonidos(self):
-        # --- SFX reales (assets/sounds) ---
-        self.snd_click = self._cargar_sfx_real("sfx_menu_option.mp3")
-        self.snd_seleccion = self._cargar_sfx_real("sfx_select.mp3")
-        self.snd_alerta = self._cargar_sfx_real("sfx_hurry.mp3", volumen=0.5)
-        self.snd_victoria = self._cargar_sfx_real("sfx_victory.mp3")
-        self.snd_derrota = self._cargar_sfx_real("sfx_lose.mp3")
-        self.snd_pausa = self._cargar_sfx_real("sfx_pause.mp3")
-        self.snd_reanudar = self._cargar_sfx_real("sfx_unpause.mp3")
-        self.snd_salir = self._cargar_sfx_real("sfx_exit_game.mp3")
-        self.snd_kamek = None
-
-        # --- Sin archivo real equivalente: se mantienen sintetizados ---
-        self.snd_pez = self.generar_sonido_sintetico(950, 0.15, "triangle", volumen=0.08)
-        self.snd_splash = self.generar_sonido_splash()
-        self.snd_tension = self.generar_sonido_tension()
-
-        # Pista de música actualmente sonando ("menu", "game", "duel" o None)
-        self._pista_actual = None
-
-        # --- VOLUMEN BASE DE CADA SFX (para reescalar con el slider de Opciones) ---
-        # Cada sonido conserva su "mezcla" relativa original (por ejemplo, el
-        # de kamek siempre un poco más fuerte que el del pez) y luego se
-        # multiplica por Config.volumen_sfx, que es lo que mueve el slider.
-        self._volumenes_base_sfx = {}
-        for nombre_attr in dir(self):
-            if nombre_attr.startswith("snd_"):
-                snd = getattr(self, nombre_attr)
-                if snd is not None:
-                    self._volumenes_base_sfx[nombre_attr] = snd.get_volume()
-        self.aplicar_volumen_sfx()
-
-    def aplicar_volumen_sfx(self):
-        """Reaplica el volumen de todos los SFX cargados según Config.volumen_sfx."""
-        for nombre_attr, volumen_base in self._volumenes_base_sfx.items():
-            snd = getattr(self, nombre_attr, None)
-            if snd is not None:
-                snd.set_volume(volumen_base * Config.volumen_sfx)
+    def detener_musica(self):
+        self.audio.detener_musica()
 
     def aplicar_volumen_musica(self):
-        """Reaplica el volumen de la música actual según Config.volumen_musica."""
-        mult = 0.45 if self._pista_actual in ("game", "duel") else 1.0
-        pygame.mixer.music.set_volume(Config.volumen_musica * mult)
+        self.audio.aplicar_volumen_musica()
 
-    def reproducir_sonido(self, sonido):
-        if Config.sfx_activo and sonido:
-            sonido.play()
+    def aplicar_volumen_sfx(self):
+        self.audio.aplicar_volumen_sfx()
 
+#Sabado 25/07/: Refactorización del método toggle_silencio_global -> GestorAudio
     def toggle_silencio_global(self):
-        """Alterna el silencio global (MUTE / UNMUTE) para Música y SFX desde cualquier pantalla con F1."""
-        estaba_activo = Config.musica_activa or Config.sfx_activo
-        nuevo_estado = not estaba_activo
-        
-        Config.musica_activa = nuevo_estado
-        Config.sfx_activo = nuevo_estado
+        """Alterna el silencio global y actualiza la interfaz (UI)."""
+        pista = self._pista_para_estado_actual()
 
+        nuevo_estado = self.audio.alternar_silencio_global(pista, self.estado)
         if hasattr(self, 'btn_toggle_musica') and self.btn_toggle_musica:
             self.btn_toggle_musica.definir_texto("MUSICA: SI" if Config.musica_activa else "MUSICA: NO")
         if hasattr(self, 'btn_toggle_sfx') and self.btn_toggle_sfx:
             self.btn_toggle_sfx.definir_texto("SFX: SI" if Config.sfx_activo else "SFX: NO")
 
-        if Config.musica_activa:
-            self.reproducir_sonido(self.snd_click)
-            self._pista_actual = None
-            pista = self._pista_para_estado_actual()
-            if self.estado not in ("FIN_JUEGO",):
-                self.reproducir_musica(pista)
-        else:
-            self.detener_musica()
-
         self.mensaje_mute_tiempo = pygame.time.get_ticks()
         self.mensaje_mute_texto = "SONIDO: SILENCIADO (MUTE)" if not nuevo_estado else "SONIDO: ACTIVADO"
 
-    def reproducir_musica(self, pista="menu"):
-        """Reproduce la pista de música real indicada ('menu', 'game' o 'duel')."""
-        if not Config.musica_activa:
-            return
-        if hasattr(self, '_pista_actual') and self._pista_actual == pista:
-            return
-        
-        archivos_musica = {
-            "menu": ["music_menu.mp3", "music_menu2.mp3", "music_menu3.mp3"],
-            "game": ["music_game.mp3", "music_game2.mp3", "music_game3.mp3"],
-            "duel": ["music_duel.mp3", "music_duel1.mp3", "music_duel2.mp3", "music_duel3.mp3"],
-        }
-
-        if pista not in archivos_musica:
-            return
-        
-        pistas= archivos_musica[pista]
-
-        try:
-            if isinstance (pistas, list):
-                self.lista_actual = pistas
-                #self.indice_cancion_actual = 0
-                self.indice_cancion_actual = random.randint(0, len(self.lista_actual) - 1)
-                
-                pygame.mixer.music.set_endevent(pygame.USEREVENT + 1)
-
-                primera = Config.RUTA_SONIDOS / self.lista_actual[self.indice_cancion_actual]
-                pygame.mixer.music.load(str(primera))
-                pygame.mixer.music.set_volume(Config.volumen_musica)
-                pygame.mixer.music.play()
-
-            else: 
-                pygame.mixer.music.set_endevent()
-                ruta = Config.RUTA_SONIDOS / pistas 
-                pygame.mixer.music.load(str(ruta))
-                pygame.mixer.music.set_volume(Config.volumen_musica)
-                pygame.mixer.music.play(loops=-1)
-
-            self._pista_actual = pista
-
-        except Exception as e:
-            print(f"No se pudo cargar la música '{pista}': {e}")
-
-    def detener_musica(self):
-        pygame.mixer.music.set_endevent()
-        pygame.mixer.music.stop()
-        self._pista_actual = None
-
+#Sabado 25/07/: Refactorización del método salir_del_juego -> GestorAudio 
     def salir_del_juego(self):
-        """Reproduce sfx_exit_game.mp3 por completo antes de cerrar el juego y volver al Launcher."""
-        self.detener_musica()
-        if Config.sfx_activo and self.snd_salir:
-            try:
-                canal = self.snd_salir.play()
-                duracion_ms = int(self.snd_salir.get_length() * 1000)
-                tiempo_inicio = pygame.time.get_ticks()
-                while canal and canal.get_busy() and (pygame.time.get_ticks() - tiempo_inicio < min(duracion_ms + 100, 3000)):
-                    pygame.time.wait(20)
-            except Exception as e:
-                print(f"Error reproduciendo sfx_exit_game: {e}")
+        """Llama al gestor de audio y apaga el bucle del juego."""
+        self.audio.reproducir_sonido_salir()
         self.ejecutando = False
-
+#--------------------------------------------------------------------------------------------------------------
     def _pista_para_estado_actual(self):
         """Determina qué pista de música corresponde al estado de juego actual."""
         estados_musica_menu = (
@@ -758,11 +534,12 @@ class ManejadorJuego:
         actual, usada tanto para sincronizar la mano indicadora como para la
         navegación con teclado (flechas + ENTER/ESPACIO)."""
         mapa = {
-            "MENU_PRINCIPAL": [self.btn_jugar, self.btn_opciones, self.btn_instrucciones, self.btn_salir],
+            "MENU_PRINCIPAL": [self.btn_jugar, self.btn_opciones, self.btn_instrucciones, self.btn_salir, self.btn_kamek],
             "MENU_MODOS": [self.btn_vs_cpu, self.btn_multi, self.btn_duelo, self.btn_volver_menu],
             "SELECCION_CANTIDAD_JUGADORES": [self.btn_cant_2, self.btn_cant_3, self.btn_cant_4, self.btn_cant_volver],
             "MENU_OPCIONES": [self.btn_toggle_musica, self.slider_musica, self.btn_toggle_sfx, self.slider_sfx, self.btn_volver],
             "INSTRUCCIONES": [self.btn_instrucciones_volver],
+            "CREDITOS": [self.btn_creditos_volver],
             "PAUSA": [self.btn_reanudar, self.btn_pausa_opciones, self.btn_pausa_menu],
             "FIN_JUEGO": [self.btn_reiniciar, self.btn_fin_menu],
         }
@@ -774,7 +551,12 @@ class ManejadorJuego:
         navegar con teclado (en ese caso pos_m es el centro del botón
         resaltado por la mano indicadora)."""
         if self.estado == "MENU_PRINCIPAL":
-            if self.btn_jugar.fue_clicado(pos_m):
+            if self.btn_kamek.fue_clicado(pos_m):
+                if self.snd_kamek:
+                    self.reproducir_sonido(self.snd_kamek)
+                self.estado_previo_creditos = "MENU_PRINCIPAL"
+                self.estado = "CREDITOS"
+            elif self.btn_jugar.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 self.estado = "MENU_MODOS"
             elif self.btn_opciones.fue_clicado(pos_m):
@@ -787,10 +569,17 @@ class ManejadorJuego:
             elif self.btn_salir.fue_clicado(pos_m):
                 self.salir_del_juego()
 
+
         elif self.estado == "INSTRUCCIONES":
             if self.btn_instrucciones_volver.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 self.estado = "MENU_PRINCIPAL"
+
+        elif self.estado == "CREDITOS":
+            if self.btn_creditos_volver.fue_clicado(pos_m):
+                self.reproducir_sonido(self.snd_click)
+                self.estado = getattr(self, "estado_previo_creditos", "MENU_PRINCIPAL")
+
 
         elif self.estado == "MENU_MODOS":
             if self.btn_vs_cpu.fue_clicado(pos_m):
@@ -880,6 +669,10 @@ class ManejadorJuego:
                 self.estado = "MENU_OPCIONES"
             elif self.btn_pausa_menu.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
+                if self.canal_tension:
+                    self.canal_tension.stop()
+                    self.canal_tension = None
+                self.sub_estado_animacion = ""
                 self.revelado = False
                 self.estado = "MENU_PRINCIPAL"
 
@@ -895,6 +688,10 @@ class ManejadorJuego:
                 self.estado = "MENU_SELECCION_PERSONAJES"
             elif self.btn_fin_menu.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
+                if self.canal_tension:
+                    self.canal_tension.stop()
+                    self.canal_tension = None
+                self.sub_estado_animacion = ""
                 self.revelado = False
                 self.estado = "MENU_PRINCIPAL"
 
@@ -907,6 +704,9 @@ class ManejadorJuego:
 
     def actualizar_logica(self, pos_mouse):
         ahora = pygame.time.get_ticks()
+        if (self.sub_estado_animacion != "JALANDO" or self.estado == "PAUSA") and self.canal_tension:
+            self.canal_tension.stop()
+            self.canal_tension = None
 
         # Al entrar a un menú nuevo, la mano indicadora vuelve a la primera opción
         if self.estado != self._ultimo_estado_menu_check:
@@ -920,7 +720,7 @@ class ManejadorJuego:
         if self.estado == "PANTALLA_TITULO":
             # Animación del GIF de fondo
             if self.frames_stars:
-                if ahora - self.ultimo_tiempo_frame_stars >= 80:
+                if ahora - self.ultimo_tiempo_frame_stars >= 800:
                     self.indice_frame_stars = (self.indice_frame_stars + 1) % len(self.frames_stars)
                     self.ultimo_tiempo_frame_stars = ahora
             
@@ -936,6 +736,8 @@ class ManejadorJuego:
             self.btn_opciones.actualizar(pos_mouse)
             self.btn_instrucciones.actualizar(pos_mouse)
             self.btn_salir.actualizar(pos_mouse)
+            self.btn_kamek.actualizar(pos_mouse)
+
         elif self.estado == "INSTRUCCIONES":
             self.btn_instrucciones_volver.actualizar(pos_mouse)
         elif self.estado == "MENU_MODOS":
@@ -1035,9 +837,12 @@ class ManejadorJuego:
                     j_actual.angulo_actual = ang_destino
                     self.sub_estado_animacion = "JALANDO"
                     self.tiempo_inicio_sub_estado = pygame.time.get_ticks()
-                    self.reproducir_sonido(self.snd_tension)
+                    if not self.canal_tension or not self.canal_tension.get_busy():
+                        self.canal_tension = self.reproducir_sonido(self.snd_tension, loops=-1)
             
             elif self.sub_estado_animacion == "JALANDO":
+                if not self.canal_tension or not self.canal_tension.get_busy():
+                    self.canal_tension = self.reproducir_sonido(self.snd_tension, loops=-1)
                 # SUSPENSO: Durante los 4 tirones NO se revela la recompensa bajo el agua.
                 if transcurrido < self.duracion_animacion_jalon:
                     progreso_jalon = transcurrido / self.duracion_animacion_jalon
@@ -1057,6 +862,9 @@ class ManejadorJuego:
                     j_actual.y = py + fuerza_y
                     cuerda_afectada.y_fin = self.altura_reposo_cuerda + fuerza_y * 0.8
                 else:
+                    if self.canal_tension:
+                        self.canal_tension.stop()
+                        self.canal_tension = None
                     # REVELACIÓN: Al completar los 4 tirones de suspenso, se revela el item
                     self.cuerdas_reveladas_indices.add(j_actual.cuerda_elegida)
                     if cuerda_afectada.contenido == "Pez Bueno":
@@ -1064,7 +872,7 @@ class ManejadorJuego:
                         self.reproducir_sonido(self.snd_pez)
                     else:
                         self.sub_estado_animacion = "CAYENDO"
-                        self.reproducir_sonido(self.snd_derrota)
+                        self.reproducir_sonido(self.snd_splash) # Domingo 26/07: Nuevo sonido acuatico 
                         self.y_al_soltar = j_actual.y
                         self.sonido_ataque_reproducido = False
                     self.tiempo_inicio_sub_estado = pygame.time.get_ticks()
@@ -1201,21 +1009,24 @@ class ManejadorJuego:
             
             if self.modo_actual == "DUELO":
                 if len(vivos_reales) == 1:
-                    ganador_set = vivos_reales[0].id
+                    ganador_obj = vivos_reales[0]
+                    ganador_set = ganador_obj.id
                     if ganador_set == 1: self.victorias_j1 += 1
                     else: self.victorias_j2 += 1
                     
+                    snd_fin = self.snd_derrota if ganador_obj.es_cpu else self.snd_victoria
+
                     if self.victorias_j1 == 2 or self.victorias_j2 == 2:
                         self.duelo_finalizado = True
                         nombre_g = self.jugadores[0].nombre if self.victorias_j1 == 2 else self.jugadores[1].nombre
                         self.mensaje_partida = f"GANADOR DEFINITIVO: {nombre_g}!"
                         self.detener_musica()
-                        self.reproducir_sonido(self.snd_victoria)
+                        self.reproducir_sonido(snd_fin)
                         self.estado = "FIN_JUEGO"
                     else:
                         self.mensaje_partida = f"¡Set para Jugador {ganador_set}! Marcador: {self.victorias_j1} - {self.victorias_j2}  [Haz clic para continuar]"
                         self.detener_musica()
-                        self.reproducir_sonido(self.snd_victoria)
+                        self.reproducir_sonido(snd_fin)
                         self.esperando_confirmacion_set = True
                         self.siguiente_set_muerte_subita = False
                 elif len(vivos_reales) == 0:
@@ -1228,15 +1039,17 @@ class ManejadorJuego:
                         self.siguiente_set_muerte_subita = False
                         self.mensaje_partida = f"¡Empate en el Set! Marcador: {self.victorias_j1} - {self.victorias_j2}  [Haz clic para continuar]"
                     self.detener_musica()
-                    self.reproducir_sonido(self.snd_derrota)
+                    self.reproducir_sonido(self.snd_empate)  #Domingo 26/07: Nuevo sonido de empate
                     self.esperando_confirmacion_set = True
                 else:
                     self.mensaje_partida = "¡Ronda terminada! Haz clic o presiona una tecla para continuar"
             else:
                 if len(vivos_reales) == 1:
-                    self.mensaje_partida = f"¡GANADOR: {vivos_reales[0].nombre}!"
+                    ganador_obj = vivos_reales[0]
+                    self.mensaje_partida = f"¡GANADOR: {ganador_obj.nombre}!"
                     self.detener_musica()
-                    self.reproducir_sonido(self.snd_victoria)
+                    snd_fin = self.snd_derrota if ganador_obj.es_cpu else self.snd_victoria
+                    self.reproducir_sonido(snd_fin)
                     self.estado = "FIN_JUEGO"
                 elif len(vivos_reales) == 0:
                     self.mensaje_partida = "¡NADIE SOBREVIVIÓ!"
@@ -1318,19 +1131,12 @@ class ManejadorJuego:
                     self.aplicar_volumen_sfx()
 
             if evento.type == pygame.USEREVENT + 1:
-                if Config.musica_activa and hasattr(self, 'lista_actual') and self.lista_actual:
-                    self.indice_cancion_actual = (self.indice_cancion_actual + 1) % len(self.lista_actual)
-                    siguiente = Config.RUTA_SONIDOS / self.lista_actual[self.indice_cancion_actual]
-            
-                    pygame.mixer.music.load(str(siguiente))
-                    pygame.mixer.music.set_volume(Config.volumen_musica)
-                    pygame.mixer.music.play()
+                self.audio.procesar_fin_pista()
                     
             teclas_reservadas = (
                 pygame.K_ESCAPE, pygame.K_F1, pygame.K_F2, pygame.K_F3, pygame.K_F4,
                 pygame.K_F5, pygame.K_F6, pygame.K_F7, pygame.K_F8, pygame.K_F9,
-                pygame.K_F10, pygame.K_F11, pygame.K_F12
-            )
+                pygame.K_F10, pygame.K_F11, pygame.K_F12)
 
             if self.estado == "PANTALLA_TITULO":
                 es_tecla = (evento.type == pygame.KEYDOWN and evento.key not in teclas_reservadas)
@@ -1387,6 +1193,9 @@ class ManejadorJuego:
                 if evento.key == pygame.K_ESCAPE:
                     if self.estado in ["EN_JUEGO", "REVELANDO_CUERDAS", "ESPERA_POST_SELECCION"]:
                         self.reproducir_sonido(self.snd_pausa)
+                        if self.canal_tension:
+                            self.canal_tension.stop()
+                            self.canal_tension = None
                         self.momento_pausa = pygame.time.get_ticks()
                         self.estado_previo_a_pausa = self.estado
                         self.estado = "PAUSA"
@@ -1404,11 +1213,15 @@ class ManejadorJuego:
                     elif self.estado == "MENU_OPCIONES":
                         self.reproducir_sonido(self.snd_click)
                         self.estado = self.estado_previo_opciones
-                    elif self.estado in ["MENU_MODOS", "SELECCION_CANTIDAD_JUGADORES", "MENU_SELECCION_PERSONAJES", "INSTRUCCIONES"]:
+                    elif self.estado in ["MENU_MODOS", "SELECCION_CANTIDAD_JUGADORES", "MENU_SELECCION_PERSONAJES", "INSTRUCCIONES", "CREDITOS"]:
                         self.reproducir_sonido(self.snd_click)
                         self.estado = "MENU_PRINCIPAL"
                     elif self.estado == "FIN_JUEGO":
                         self.reproducir_sonido(self.snd_click)
+                        if self.canal_tension:
+                            self.canal_tension.stop()
+                            self.canal_tension = None
+                        self.sub_estado_animacion = ""
                         self.revelado = False
                         self.estado = "MENU_PRINCIPAL"
                     else:
@@ -1615,6 +1428,7 @@ class ManejadorJuego:
         self.ultimo_segundo_alerta = 5
         self.momento_inicio_pensamiento_cpu = 0
         self.mensaje_partida = ""
+        self.reproducir_musica("duel" if self.modo_actual == "DUELO" else "game")
 
     def forzar_resurreccion_duelo(self):
         for j in self.jugadores:
@@ -1632,6 +1446,7 @@ class ManejadorJuego:
         self.momento_inicio_turno = 0
         self.ultimo_segundo_alerta = 5
         self.momento_inicio_pensamiento_cpu = 0
+        self.reproducir_musica("duel")
     def dibujar_plataforma_modular(self):
         """Dibuja la plataforma circular/elíptica de 430x175 px con la textura de borde incorporada claramente visible."""
         if self.sprite_platform:
@@ -1710,7 +1525,7 @@ class ManejadorJuego:
         """Método reservado para efectos de oleaje ambiental."""
         pass
 
-    def dibujar_titulo_animado(self, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110, tamano_titulo=56, tamano_sub=32):
+    def dibujar_titulo_animado(self, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110, tamano_titulo=56, tamano_sub=28):
         if centro_x is None:
             centro_x = Config.ANCHO // 2
             
@@ -1755,10 +1570,10 @@ class ManejadorJuego:
             color_sub = Config.AMARILLO if (t // 300) % 2 == 0 else Config.BLANCO
             
             txt_sub = fuente_sub.render(texto_sub, True, color_sub)
-            rect_sub = txt_sub.get_rect(center=(centro_x, base_y + 42))
+            rect_sub = txt_sub.get_rect(center=(centro_x, base_y + 50))
             
             shadow_sub = fuente_sub.render(texto_sub, True, Config.NEGRO)
-            rect_shadow_sub = shadow_sub.get_rect(center=(centro_x + 2, base_y + 44))
+            rect_shadow_sub = shadow_sub.get_rect(center=(centro_x + 2, base_y + 52))
             
             self.pantalla.blit(shadow_sub, rect_shadow_sub)
             self.pantalla.blit(txt_sub, rect_sub)
@@ -1781,15 +1596,15 @@ class ManejadorJuego:
             t = pygame.time.get_ticks()
             
             # --- TÍTULO ESTILO MARIO PARTY EN PANTALLA DE INICIO ---
-            self.dibujar_titulo_animado("CHEEP CHEEP CHANCE", "REMAKE", base_y=Config.ALTO // 2 - 80, tamano_titulo=62, tamano_sub=36)
+            self.dibujar_titulo_animado("CHEEP CHEEP CHANCE", "REMAKE", base_y=Config.ALTO // 2 - 80, tamano_titulo=72, tamano_sub=48)
             
             # Mensaje pulsante
             alpha_pulsante = int(127 + 128 * math.sin(t * 0.005))
-            txt_press = self.fuente_subtitulo.render("PRESIONA CUALQUIER TECLA PARA CONTINUAR", True, Config.BLANCO)
+            txt_press = self.fuente_subtitulo.render("PRESIONA CUALQUIER TECLA PARA CONTINUAR", True, Config.NEGRO)
             
             surf_press = txt_press.copy()
             surf_press.set_alpha(alpha_pulsante)
-            rect_press = surf_press.get_rect(center=(Config.ANCHO // 2, Config.ALTO // 2 + 160))
+            rect_press = surf_press.get_rect(center=(Config.ANCHO // 2, Config.ALTO // 2 + 240))
             self.pantalla.blit(surf_press, rect_press)
             
         elif self.estado == "MENU_PRINCIPAL":
@@ -1798,15 +1613,14 @@ class ManejadorJuego:
             self.pantalla.blit(capa_oscura, (0, 0))
             
             # --- TÍTULO ANIMADO CON EFECTO MARIO PARTY EN MENÚ PRINCIPAL ---
-            self.dibujar_titulo_animado("CHEEP CHEEP CHANCE", "REMAKE", base_y=110, tamano_titulo=54, tamano_sub=30)
+            self.dibujar_titulo_animado("CHEEP CHEEP CHANCE", "REMAKE", base_y=110, tamano_titulo=72, tamano_sub=48)
             
             self.btn_jugar.dibujar(self.pantalla)
             self.btn_opciones.dibujar(self.pantalla)
             self.btn_instrucciones.dibujar(self.pantalla)
             self.btn_salir.dibujar(self.pantalla)
-            
-            if self.sprite_kamek:
-                self.pantalla.blit(self.sprite_kamek, (Config.ANCHO - 120, Config.ALTO - 120))
+            self.btn_kamek.dibujar(self.pantalla)
+
             
         elif self.estado == "MENU_MODOS":
             capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
@@ -1994,9 +1808,7 @@ class ManejadorJuego:
             self.pantalla.blit(txt_inst, txt_inst.get_rect(center=(Config.ANCHO // 2, 700)))
 
         elif self.estado == "MENU_OPCIONES":
-            capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
-            capa_oscura.fill((10, 20, 40, 200))
-            self.pantalla.blit(capa_oscura, (0, 0))
+            self.pantalla.blit(self._overlay_opciones, (0, 0))
             
             txt_shadow = self.fuente_titulo.render("OPCIONES", True, Config.NEGRO)
             self.pantalla.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 83)))
@@ -2011,9 +1823,7 @@ class ManejadorJuego:
             self.btn_volver.dibujar(self.pantalla)
             
         elif self.estado == "INSTRUCCIONES":
-            capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
-            capa_oscura.fill((10, 20, 40, 215))
-            self.pantalla.blit(capa_oscura, (0, 0))
+            self.pantalla.blit(self._overlay_instrucciones, (0, 0))
             
             txt_shadow = self.fuente_titulo.render("INSTRUCCIONES", True, Config.NEGRO)
             self.pantalla.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 53)))
@@ -2075,6 +1885,53 @@ class ManejadorJuego:
             self.pantalla.blit(t_subdesc2, t_subdesc2.get_rect(center=(card2_rect.centerx, card2_rect.top + 225)))
 
             self.btn_instrucciones_volver.dibujar(self.pantalla)
+
+        elif self.estado == "CREDITOS":
+            self.pantalla.blit(self._overlay_instrucciones, (0, 0))
+            
+            txt_shadow = self.fuente_titulo.render("CRÉDITOS", True, Config.NEGRO)
+            self.pantalla.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 53)))
+            txt = self.fuente_titulo.render("CRÉDITOS", True, Config.AMARILLO)
+            self.pantalla.blit(txt, txt.get_rect(center=(Config.ANCHO // 2, 50)))
+
+            if self.sprite_kamek:
+                self.pantalla.blit(self.sprite_kamek, (Config.ANCHO // 2 - 50, 105))
+            
+            # Tarjeta de créditos
+            card_cred = pygame.Rect(Config.ANCHO // 2 - 320, 220, 640, 380)
+            pygame.draw.rect(self.pantalla, (15, 25, 45, 220), card_cred, border_radius=12)
+            pygame.draw.rect(self.pantalla, Config.AMARILLO, card_cred, width=2, border_radius=12)
+
+            y_pos = 245
+            txt_materia_shadow = self.fuente_subtitulo.render("DESARROLLADO PARA:", True, Config.NEGRO)
+            self.pantalla.blit(txt_materia_shadow, txt_materia_shadow.get_rect(center=(card_cred.centerx + 2, y_pos + 2)))
+            txt_materia = self.fuente_subtitulo.render("DESARROLLADO PARA:", True, Config.AMARILLO)
+            self.pantalla.blit(txt_materia, txt_materia.get_rect(center=(card_cred.centerx, y_pos)))
+
+            y_pos += 38
+            txt_sec = self.fuente_ui.render("Objetos y Abstracción de Datos - Sección 01", True, Config.BLANCO)
+            self.pantalla.blit(txt_sec, txt_sec.get_rect(center=(card_cred.centerx, y_pos)))
+
+            y_pos += 55
+            txt_dev_shadow = self.fuente_subtitulo.render("--- DESARROLLADORES (GRUPO #3) ---", True, Config.NEGRO)
+            self.pantalla.blit(txt_dev_shadow, txt_dev_shadow.get_rect(center=(card_cred.centerx + 2, y_pos + 2)))
+            txt_dev = self.fuente_subtitulo.render("--- DESARROLLADORES (GRUPO #3) ---", True, Config.AMARILLO)
+            self.pantalla.blit(txt_dev, txt_dev.get_rect(center=(card_cred.centerx, y_pos)))
+
+            autores = [
+                "• Gibran Sánchez",
+                "• Marcelys Tebres",
+                "• Maximiliano Toro",
+                "• Ricardo Trevison"
+            ]
+            y_pos += 45
+            for autor in autores:
+                txt_a = self.fuente_ui.render(autor, True, Config.BLANCO)
+                self.pantalla.blit(txt_a, txt_a.get_rect(center=(card_cred.centerx, y_pos)))
+                y_pos += 32
+
+            self.btn_creditos_volver.dibujar(self.pantalla)
+
             
         elif self.estado in ["EN_JUEGO", "PAUSA", "FIN_JUEGO", "REVELANDO_CUERDAS", "ESPERA_POST_SELECCION"]:
             self.dibujar_plataforma_modular()
@@ -2087,10 +1944,9 @@ class ManejadorJuego:
                 c.dibujar(self.pantalla)
             
             for b in self.burbujas:
-                burbuja_surf = pygame.Surface((10, 10), pygame.SRCALPHA)
-                pygame.draw.circle(burbuja_surf, (255, 255, 255, 150), (5, 5), int(b[2] * 3), 1)
-                pygame.draw.circle(burbuja_surf, (200, 240, 255, 60), (5, 5), int(b[2] * 3) - 1)
-                self.pantalla.blit(burbuja_surf, (int(b[0] - 5), int(b[1] - 5)))
+                key = max(1, min(4, int(b[2])))
+                surf_b = self._burbujas_cache[key]
+                self.pantalla.blit(surf_b, (int(b[0]) - surf_b.get_width() // 2, int(b[1]) - surf_b.get_height() // 2))
             
             for idx, c in enumerate(self.cuerdas):
                 en_proceso = idx in self.cuerdas_reveladas_indices
@@ -2208,9 +2064,7 @@ class ManejadorJuego:
             
             # --- OVERLAY DE PAUSA ---
             if self.estado == "PAUSA":
-                capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
-                capa_oscura.fill((0, 0, 0, 160))
-                self.pantalla.blit(capa_oscura, (0, 0))
+                self.pantalla.blit(self._overlay_pausa, (0, 0))
                 txt_pausa = self.fuente_pausa.render("JUEGO PAUSADO", True, Config.AMARILLO)
                 txt_pausa_rect = txt_pausa.get_rect(center=(Config.ANCHO // 2, 210))
                 self.pantalla.blit(txt_pausa, txt_pausa_rect)
@@ -2220,9 +2074,7 @@ class ManejadorJuego:
                 
             # --- OVERLAY DE FIN DE JUEGO ---
             elif self.estado == "FIN_JUEGO":
-                capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
-                capa_oscura.fill((15, 20, 30, 225))
-                self.pantalla.blit(capa_oscura, (0, 0))
+                self.pantalla.blit(self._overlay_fin_juego, (0, 0))
                 
                 txt_fin_shadow = self.fuente_titulo.render("PARTIDA FINALIZADA", True, Config.NEGRO)
                 self.pantalla.blit(txt_fin_shadow, txt_fin_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 153)))

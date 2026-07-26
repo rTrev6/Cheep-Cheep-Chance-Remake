@@ -3,107 +3,7 @@ import math
 import os
 import random
 from src.config import Config
-
-class Boton:
-    # --- OPTIMIZACIÓN: las texturas de menú y la mano se cargan UNA sola vez
-    # desde disco y se comparten (a nivel de clase) entre todas las instancias
-    # de Boton, evitando I/O repetido cada vez que se crea un botón nuevo. ---
-    _tex_normal_raw = None
-    _tex_selected_raw = None
-    _tex_hand_raw = None
-    _texturas_cargadas = False
-
-    @classmethod
-    def _cargar_texturas(cls):
-        if cls._texturas_cargadas:
-            return
-        cls._texturas_cargadas = True
-        try:
-            cls._tex_normal_raw = pygame.image.load(str(Config.SPRITE_MENU)).convert_alpha()
-        except Exception as e:
-            print(f"Error cargando textura de menú: {e}")
-        try:
-            cls._tex_selected_raw = pygame.image.load(str(Config.SPRITE_MENU_SELECTED)).convert_alpha()
-        except Exception as e:
-            print(f"Error cargando textura de menú seleccionado: {e}")
-        try:
-            cls._tex_hand_raw = pygame.image.load(str(Config.SPRITE_HAND)).convert_alpha()
-        except Exception as e:
-            print(f"Error cargando sprite de mano: {e}")
-
-    def __init__(self, x, y, ancho, alto, texto, color_base, color_hover):
-        self.rect = pygame.Rect(x, y, ancho, alto)
-        self.texto = texto
-        self.color_base = color_base
-        self.color_hover = color_hover
-        self.color_actual = color_base
-
-        # --- OPTIMIZACIÓN: Carga e inicialización única de texto ---
-        self.fuente = pygame.font.Font(Config.FUENTE_PRINCIPAL, 28)
-        self.texto_surf = self.fuente.render(self.texto, True, Config.NEGRO)
-        self.texto_rect = self.texto_surf.get_rect(center=self.rect.center)
-
-        # --- TEXTURAS ESTILO MARIO (menu_sprite / menu_selected_sprite) ---
-        Boton._cargar_texturas()
-        self.tex_normal = None
-        self.tex_selected = None
-        if Boton._tex_normal_raw:
-            self.tex_normal = pygame.transform.scale(Boton._tex_normal_raw, (ancho, alto))
-        if Boton._tex_selected_raw:
-            # La textura "seleccionada" se dibuja un poco más grande para dar
-            # esa sensación de botón "abultado" al pasar el mouse o navegar.
-            crecimiento = 10
-            self.tex_selected = pygame.transform.scale(
-                Boton._tex_selected_raw, (ancho + crecimiento, alto + crecimiento)
-            )
-
-        # --- ESTADO DE RESALTADO (mouse y/o navegación por teclado) ---
-        self.hover = False
-        self.resaltado_teclado = False
-
-        # --- SPRITE DE MANO (cursor de selección tipo Mario Party) ---
-        self.hand_img = None
-        if Boton._tex_hand_raw:
-            alto_mano = int(alto * 0.85)
-            ancho_mano = int(Boton._tex_hand_raw.get_width() * (alto_mano / Boton._tex_hand_raw.get_height()))
-            self.hand_img = pygame.transform.scale(Boton._tex_hand_raw, (ancho_mano, alto_mano))
-
-    def actualizar(self, pos_mouse):
-        self.hover = self.rect.collidepoint(pos_mouse)
-        self.color_actual = self.color_hover if self.hover else self.color_base
-
-    def set_resaltado_teclado(self, valor):
-        self.resaltado_teclado = valor
-
-    def dibujar(self, superficie):
-        seleccionado = self.resaltado_teclado
-
-        if seleccionado and self.tex_selected:
-            rect_tex = self.tex_selected.get_rect(center=self.rect.center)
-            superficie.blit(self.tex_selected, rect_tex)
-        elif self.tex_normal:
-            superficie.blit(self.tex_normal, self.rect)
-        else:
-            # Fallback vectorial por si las texturas no pudieron cargarse
-            pygame.draw.rect(superficie, self.color_actual, self.rect, border_radius=8)
-            pygame.draw.rect(superficie, Config.NEGRO, self.rect, width=2, border_radius=8)
-
-        superficie.blit(self.texto_surf, self.texto_rect)
-
-        # Mano indicadora: aparece a la izquierda de la opción resaltada,
-        # con un ligero bamboleo para que se note que "apunta" a la opción.
-        if seleccionado and self.hand_img:
-            bamboleo = int(math.sin(pygame.time.get_ticks() * 0.008) * 4)
-            hand_rect = self.hand_img.get_rect(midright=(self.rect.left - 6 + bamboleo, self.rect.centery))
-            superficie.blit(self.hand_img, hand_rect)
-
-    def fue_clicado(self, pos_mouse):
-        return self.rect.collidepoint(pos_mouse)
-
-    def definir_texto(self, nuevo_texto):
-        self.texto = nuevo_texto
-        self.texto_surf = self.fuente.render(self.texto, True, Config.NEGRO)
-        self.texto_rect = self.texto_surf.get_rect(center=self.rect.center)
+from src.ui import Boton, Slider
 
 
 class Jugador:
@@ -387,16 +287,52 @@ class Cuerda:
         self.sprite_fish = Cuerda._cache_sprite_fish
         self.sprite_monster1 = Cuerda._cache_sprite_monster1
         self.sprite_monster2 = Cuerda._cache_sprite_monster2
+        self._cache_segmentos_curvos = None
+
+    def _precalcular_segmentos_curvos(self):
+        grosor = 32
+        cx = Config.SALV_X + Config.SALV_ANCHO // 2
+        x_in = int(cx + (self.x - cx) * 0.44)
+        y_in = Config.SALV_Y + int(Config.SALV_ALTO * 0.50)
+        x_out = self.x
+        y_out = self.y_inicio
+        x_ctrl = (x_in + x_out) // 2
+        y_ctrl = y_in - 10
+
+        num_pasos = 25
+        puntos_curva = []
+        for i in range(num_pasos + 1):
+            t = i / num_pasos
+            inv_t = 1.0 - t
+            px = inv_t * inv_t * x_in + 2 * inv_t * t * x_ctrl + t * t * x_out
+            py = inv_t * inv_t * y_in + 2 * inv_t * t * y_ctrl + t * t * y_out
+            puntos_curva.append((px, py))
+
+        w_cr, h_cr = self.sprite_rope.get_size()
+        rope_clean = self.sprite_rope.subsurface((0, 4, w_cr, max(1, h_cr - 8)))
+
+        self._cache_segmentos_curvos = []
+        for i in range(len(puntos_curva) - 1):
+            p1 = puntos_curva[i]
+            p2 = puntos_curva[i + 1]
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            dist = max(1, int(math.hypot(dx, dy)))
+            ang = math.degrees(math.atan2(dy, dx)) - 90
+            surf_seg = pygame.transform.scale(rope_clean, (grosor, dist + 4))
+            surf_seg_rot = pygame.transform.rotate(surf_seg, -ang)
+            rect_seg = surf_seg_rot.get_rect(center=((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2))
+            self._cache_segmentos_curvos.append((surf_seg_rot, rect_seg))
 
     def dibujar(self, superficie, revelado_total, en_proceso=False, resaltada=False):
         largo_actual = int(self.y_fin - self.y_inicio)
 
         # 0. RESALTADO AL PASAR/APUNTAR EL MOUSE (Flecha animada + Viga translúcida sin círculo)
         if resaltada and self.ocupada_por is None:
-            guel_surf = pygame.Surface((32, max(1, largo_actual + 16)), pygame.SRCALPHA)
-            alpha_glow = 85 + int(math.sin(pygame.time.get_ticks() * 0.008) * 35)
-            pygame.draw.rect(guel_surf, (255, 215, 0, alpha_glow), (0, 0, 32, max(1, largo_actual + 16)), border_radius=6)
-            superficie.blit(guel_surf, (self.x - 16, self.y_inicio - 8))
+            if not hasattr(self, '_glow_surf') or self._glow_surf.get_height() != max(1, largo_actual + 16):
+                self._glow_surf = pygame.Surface((32, max(1, largo_actual + 16)), pygame.SRCALPHA)
+                pygame.draw.rect(self._glow_surf, (255, 215, 0, 110), (0, 0, 32, max(1, largo_actual + 16)), border_radius=6)
+            superficie.blit(self._glow_surf, (self.x - 16, self.y_inicio - 8))
 
             bamboleo_arrow = math.sin(pygame.time.get_ticks() * 0.01) * 4
             y_base_arrow = self.y_inicio - 16 + bamboleo_arrow
@@ -408,57 +344,20 @@ class Cuerda:
             pygame.draw.polygon(superficie, Config.AMARILLO, puntos_flecha)
             pygame.draw.polygon(superficie, Config.NEGRO, puntos_flecha, width=2)
 
-        # 1. DIBUJAR CUERDA CURVEADA EN 3D SOBRE EL SALVAVIDAS (USANDO SPRITE_ROPE)
+        # 1. DIBUJAR CUERDA CURVEADA EN 3D SOBRE EL SALVAVIDAS (USANDO CACHÉ OPTIMIZADA DE SEGMENTOS)
         if largo_actual > 0:
-            grosor = 32  # ANCHO de la cuerda en píxeles (Modificar para ajustar grosor)
-            cx = Config.SALV_X + Config.SALV_ANCHO // 2
-            
-            # Punto A: Piso interior del salvavidas (nace más arriba cerca del piso interior)
-            x_in = int(cx + (self.x - cx) * 0.44)
-            y_in = Config.SALV_Y + int(Config.SALV_ALTO * 0.50)  # ALTURA INICIAL (0.32 para que nazca más arriba)
-            
-            # Punto B: Borde frontal exterior del salvavidas
-            x_out = self.x
-            y_out = self.y_inicio
-            
-            # Punto de Control para la curva Bézier sobre el cojín
-            x_ctrl = (x_in + x_out) // 2
-            y_ctrl = y_in - 10
-            
-            # Número de divisiones/tramos de la curva
-            num_pasos = 25  # Cantidad de segmentos en los que se divide la curva
-            puntos_curva = []
-            for i in range(num_pasos + 1):
-                t = i / num_pasos
-                inv_t = 1.0 - t
-                px = inv_t * inv_t * x_in + 2 * inv_t * t * x_ctrl + t * t * x_out
-                py = inv_t * inv_t * y_in + 2 * inv_t * t * y_ctrl + t * t * y_out
-                puntos_curva.append((px, py))
-            
-            # A) Tramo curvo superior usando segmentos continuos de cuerda texturizada sin bordes oscuros
-            w_cr, h_cr = self.sprite_rope.get_size()
-            rope_clean = self.sprite_rope.subsurface((0, 4, w_cr, max(1, h_cr - 8)))
-            
-            for i in range(len(puntos_curva) - 1):
-                p1 = puntos_curva[i]
-                p2 = puntos_curva[i + 1]
-                dx = p2[0] - p1[0]
-                dy = p2[1] - p1[1]
-                dist = max(1, int(math.hypot(dx, dy)))
-                ang = math.degrees(math.atan2(dy, dx)) - 90
-                
-                # LARGO DE CADA TRAMO: (dist + 4). Usando sprite recortado limpio sin rayas horizontales.
-                surf_seg = pygame.transform.scale(rope_clean, (grosor, dist + 4))
-                surf_seg_rot = pygame.transform.rotate(surf_seg, -ang)
-                rect_seg = surf_seg_rot.get_rect(center=((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2))
+            if self._cache_segmentos_curvos is None:
+                self._precalcular_segmentos_curvos()
+
+            for surf_seg_rot, rect_seg in self._cache_segmentos_curvos:
                 superficie.blit(surf_seg_rot, rect_seg)
 
             # B) Tramo vertical colgante recto (solapado 10px hacia arriba para ELIMINAR la separación en el borde)
-            y_start_vert = y_out - 10
+            y_start_vert = self.y_inicio - 10
             largo_vert = int(self.y_fin - y_start_vert)
             if largo_vert > 0:
-                cuerda_vert = pygame.transform.scale(self.sprite_rope, (grosor, largo_vert))
-                superficie.blit(cuerda_vert, (x_out - grosor // 2, y_start_vert))
+                cuerda_vert = pygame.transform.scale(self.sprite_rope, (32, largo_vert))
+                superficie.blit(cuerda_vert, (self.x - 16, y_start_vert))
 
         # 2. REVELAR RECOMPENSAS PESCADAS (Visibles de forma clara e inmediata al pescar)
         debe_dibujar = False
@@ -539,16 +438,15 @@ class CriaturaAmbiental:
 
             self.sprite = pygame.transform.scale(sprite_base, (self.ancho, self.alto))
 
-            # Aplicar tinte para dar variedad de colores solo a los peces
-            if self.es_pez:
-                color_tinte = random.choice([
-                    (255, 255, 255, 255), # Original
-                    (255, 130, 130, 255), # Rojo
-                    (130, 255, 130, 255), # Verde
-                    (255, 220, 100, 255), # Dorado
-                    (130, 190, 255, 255), # Celeste
-                    (230, 130, 255, 255)  # Violeta
-                ])
+            color_tinte = random.choice([
+                (255, 255, 255, 255), # Original
+                (255, 130, 130, 255), # Rojo
+                (130, 255, 130, 255), # Verde
+                (255, 220, 100, 255), # Dorado
+                (130, 190, 255, 255), # Celeste
+                (230, 130, 255, 255)  # Violeta
+            ])
+            if self.es_pez and color_tinte != (255, 255, 255, 255):
                 tinte_surf = pygame.Surface((self.ancho, self.alto), pygame.SRCALPHA)
                 tinte_surf.fill(color_tinte)
                 self.sprite.blit(tinte_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
