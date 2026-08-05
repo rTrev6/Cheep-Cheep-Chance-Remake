@@ -1,21 +1,25 @@
 import pygame
 import sys
-from src.config import Config
-from src.game import ManejadorJuego
+from src.config import *
+from src.game import *
 
 def main():
-    # Inicialización propia obligatoria desde cero
     pygame.init()
     pygame.display.set_caption("Cheep Cheep Chance Remake")
     
-    # Ventana con la resolución idéntica al Launcher
+    ruta_icono = Config.RUTA_IMAGENES / "icon_Kamek.png"
+    if ruta_icono.exists():
+        try:
+            icono = pygame.image.load(str(ruta_icono))
+            pygame.display.set_icon(icono)
+        except Exception as e:
+            print(f"Error cargando icono de ventana: {e}")
+    
     pantalla = pygame.display.set_mode((Config.ANCHO, Config.ALTO))
     
-    # Instancia y ejecuta el juego (Encapsulamiento total sin globales)
     juego = ManejadorJuego(pantalla)
     juego.ejecutar()
     
-    # REQUISITO CÁTEDRA: Cierre seguro y limpio al terminar
     pygame.quit()
     sys.exit()
 
