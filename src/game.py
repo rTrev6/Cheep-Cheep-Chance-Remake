@@ -1,17 +1,19 @@
 import pygame
 import random
 import math
-import sys
 from src.config import *
 from src.entity import *
 from src.ui import Boton, Slider
 from src.audio import GestorAudio
 from src.renderer import RenderizadorEscenario
+from src.states import (
+    EstadoPantallaTitulo, EstadoMenuGenerico, EstadoOpciones, EstadoPartida, EstadoPausa
+)
 
 # Aseguramos la inicialización de Pygame y su mixer
 pygame.init()
 try:
-    pygame.mixer.init(frequency=22050, size=-16, channels=2) # 2 channels for stereo mix
+    pygame.mixer.init(frequency=22050, size=-16, channels=2)
 except Exception as e:
     print(f"No se pudo inicializar el mixer de Pygame: {e}")
 
@@ -22,10 +24,32 @@ class ManejadorJuego:
         self.ejecutando = True
         self.renderer = RenderizadorEscenario(self.pantalla)
         
-        # --- ESTADO INICIAL ---
-        # Se inicia en la Pantalla de Título parpadeante con música chiptune
-        self.estado = "PANTALLA_TITULO"
+        # ESTADO INICIAL Y MÁQUINA DE ESTADOS
+        self._estado = "PANTALLA_TITULO"
         self.estado_previo_opciones = "MENU_PRINCIPAL"
+        self.indice_boton_seleccionado = 0
+        
+        self.diccionario_estados = {
+            "PANTALLA_TITULO": EstadoPantallaTitulo(self),
+            "MENU_PRINCIPAL": EstadoMenuGenerico(self, "MENU_PRINCIPAL"),
+            "MENU_MODOS": EstadoMenuGenerico(self, "MENU_MODOS"),
+            "SELECCION_CANTIDAD_JUGADORES": EstadoMenuGenerico(self, "SELECCION_CANTIDAD_JUGADORES"),
+            "SELECCION_MODO_DUELO": EstadoMenuGenerico(self, "SELECCION_MODO_DUELO"),
+            "MENU_SELECCION_PERSONAJES": EstadoMenuGenerico(self, "MENU_SELECCION_PERSONAJES"),
+            "INSTRUCCIONES": EstadoMenuGenerico(self, "INSTRUCCIONES"),
+            "CREDITOS": EstadoMenuGenerico(self, "CREDITOS"),
+            "FIN_JUEGO": EstadoMenuGenerico(self, "FIN_JUEGO"),
+            "MENU_OPCIONES": EstadoOpciones(self),
+            "JUGANDO": EstadoPartida(self),
+            "EN_JUEGO": EstadoPartida(self),
+            "DUELO_ESPECIAL": EstadoPartida(self),
+            "REVELANDO_CUERDAS": EstadoPartida(self),
+            "ESPERA_POST_SELECCION": EstadoPartida(self),
+            "EN_PAUSA": EstadoPausa(self),
+            "PAUSA": EstadoPausa(self),
+        }
+        self.estado_obj = self.diccionario_estados["PANTALLA_TITULO"]
+
         
         # --- GESTOR DE AUDIO MODULARIZADO ---
         self.audio = GestorAudio()
@@ -33,9 +57,10 @@ class ManejadorJuego:
         self.snd_seleccion = self.audio.snd_seleccion
         self.snd_alerta = self.audio.snd_alerta
         self.snd_victoria = self.audio.snd_victoria
-        self.snd_empate = self.audio.snd_empate #Domingo 26/07: Nuevo sonido añadido
+        self.snd_empate = self.audio.snd_empate 
         self.snd_derrota = self.audio.snd_derrota
         self.snd_pausa = self.audio.snd_pausa
+        self.snd_personaje = self.audio.snd_personaje 
         self.snd_reanudar = self.audio.snd_reanudar
         self.snd_salir = self.audio.snd_salir
         self.snd_pez = self.audio.snd_pez
@@ -51,17 +76,17 @@ class ManejadorJuego:
         self.fuente_titulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 44)
         self.fuente_pausa = pygame.font.Font(Config.FUENTE_PRINCIPAL, 48)
         self.fuente_subtitulo = pygame.font.Font(Config.FUENTE_PRINCIPAL, 36)
-        self.fuente_ui = pygame.font.Font(Config.FUENTE_PRINCIPAL, 20)
+        self.fuente_ui = pygame.font.Font(Config.FUENTE_PRINCIPAL, 28)
         self.fuente_fps = pygame.font.Font(Config.FUENTE_PRINCIPAL, 18)
         # Fuente más grande para el panel lateral y banner HUD de partida
         self.fuente_panel = pygame.font.Font(Config.FUENTE_PRINCIPAL, 24)
         self.fuente_hud_banner = pygame.font.Font(Config.FUENTE_PRINCIPAL, 28)
         self.fuente_fases_grandes = pygame.font.Font(Config.FUENTE_PRINCIPAL, 34)
         
-        # --- REPRODUCCIÓN DE MÚSICA DE FONDO Y GESTOR DE AUDIO ---
+        # REPRODUCCIÓN DE MÚSICA DE FONDO 
         self.reproducir_musica()
         
-        # --- CARGAR FONDOS DE PANTALLA DUALES (SUPERFICIE Y SUBMARINO) ---
+        # CARGAR FONDOS DE PANTALLA DUALES (SUPERFICIE Y SUBMARINO PARA PARTIDAS) ---
         try:
             raw_top = pygame.image.load(str(Config.SPRITE_BACKGROUND_TOP)).convert()
             self.bg_image_top = pygame.transform.scale(raw_top, (Config.ANCHO, Config.NIVEL_AGUA))
@@ -79,7 +104,16 @@ class ManejadorJuego:
             self.bg_image_bottom = pygame.Surface((Config.ANCHO, Config.ALTO - Config.NIVEL_AGUA))
             self.bg_image_bottom.fill(Config.AZUL_MAR)
 
-        # --- CARGAR TEXTURA PERSONALIZADA DE PLATAFORMA ---
+        #  CARGAR FONDO DE PANTALLA ÚNICO PARA EL MENÚ PRINCIPAL
+        try:
+            raw_bg = pygame.image.load(str(Config.SPRITE_BACKGROUND)).convert()
+            self.bg_image_menu = pygame.transform.scale(raw_bg, (Config.ANCHO, Config.ALTO))
+        except Exception as e:
+            print(f"Error cargando fondo de menú: {e}")
+            self.bg_image_menu = pygame.Surface((Config.ANCHO, Config.ALTO))
+            self.bg_image_menu.fill(Config.AZUL_MAR)
+
+        # CARGAR TEXTURA PERSONALIZADA DE PLATAFORMA 
         self.sprite_platform = None
         path_plat = Config.SPRITE_PLATFORM
         if not path_plat.exists() and Config.RUTA_IMAGENES.exists():
@@ -109,7 +143,7 @@ class ManejadorJuego:
             except Exception as e:
                 print(f"Error cargando textura de borde: {e}")
 
-        # --- CARGAR SECUENCIA ANIMADA MAINFRAME DE FONDO ---
+        # CARGAR SECUENCIA ANIMADA MAINFRAME DE FONDO
         self.frames_stars = []
         self.indice_frame_stars = 0
         self.ultimo_tiempo_frame_stars = 0
@@ -129,7 +163,7 @@ class ManejadorJuego:
                 print(f"Secuencia animada mainframe cargada: {len(self.frames_stars)} frames.")
 
 
-        # --- CARGAR ICONO DE KAMEK ---
+        # CARGAR ICONO DE KAMEK
         self.sprite_kamek = None
         path_kamek = Config.RUTA_IMAGENES / "icon_Kamek.png"
         if not path_kamek.exists() and Config.RUTA_IMAGENES.exists():
@@ -155,13 +189,6 @@ class ManejadorJuego:
             self.btn_kamek.hand_img = pygame.transform.scale(Boton._tex_hand_raw, (ancho_mano, alto_mano))
 
 
-
-        # --- CORRECCIÓN DE BUG DE RENDIMIENTO ---
-        # Antes, la pantalla "MENU_SELECCION_PERSONAJES" cargaba y reescalaba
-        # cada sel_{Personaje}_icon_sprite.png DESDE DISCO en cada fotograma
-        # (60 veces por segundo x 8 personajes), generando I/O innecesario y
-        # posibles tirones. Ahora se precargan una única vez aquí y se
-        # reutilizan desde memoria en el render.
         self.sprites_seleccion = {}
         for nombre_char in Config.PERSONAJES:
             filename_sel = f"sel_{nombre_char}_icon_sprite.png"
@@ -179,7 +206,7 @@ class ManejadorJuego:
                 except Exception as e:
                     print(f"Error cargando sprite de selección {nombre_char}: {e}")
 
-        # --- CARGAR IMÁGENES DE CONTROLES (ctrl_*.png) PARA LA PANTALLA DE INSTRUCCIONES ---
+        # CARGAR IMÁGENES DE CONTROLES (ctrl_*.png) PARA LA PANTALLA DE INSTRUCCIONES 
         self.img_ctrl_wasd = None
         self.img_ctrl_arrow = None
         self.img_ctrl_mouse = None
@@ -219,14 +246,29 @@ class ManejadorJuego:
             alpha = int(35 + progreso * 70)
             pygame.draw.rect(self.tinte_agua, (*Config.AZUL_MAR, alpha), (0, y, Config.ANCHO, paso))
             
-        # --- CRIATURAS MARINAS EN EL FONDO ---
+        # --- CRIATURAS MARINAS EN EL FONDO (DIVERSIDAD Y AUTO-FLIP DE ESPECIES) ---
         self.criaturas = []
-        for _ in range(8):
+        # Peces variados (1 a 4)
+        for _ in range(2):
             self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_FISH_LEFT), str(Config.SPRITE_FISH_RIGHT), es_pez=True))
-        for _ in range(4):
-            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER_LEFT), str(Config.SPRITE_MONSTER_RIGHT), es_pez=False, escala_factor=1.0))
-        for _ in range(4):
-            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER2_LEFT), str(Config.SPRITE_MONSTER2_RIGHT), es_pez=False, escala_factor=1.0))
+        for _ in range(2):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_FISH2_LEFT), str(Config.SPRITE_FISH2_RIGHT), es_pez=True))
+        for _ in range(2):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_FISH3_LEFT), str(Config.SPRITE_FISH3_RIGHT), es_pez=True))
+        for _ in range(2):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_FISH4_LEFT), str(Config.SPRITE_FISH4_RIGHT), es_pez=True))
+            
+        # Monstruos variados (1 a 5)
+        for _ in range(1):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER_LEFT), str(Config.SPRITE_MONSTER_RIGHT), es_pez=False))
+        for _ in range(1):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER2_LEFT), str(Config.SPRITE_MONSTER2_RIGHT), es_pez=False))
+        for _ in range(1):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER3_LEFT), str(Config.SPRITE_MONSTER3_RIGHT), es_pez=False))
+        for _ in range(1):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER4_LEFT), str(Config.SPRITE_MONSTER4_RIGHT), es_pez=False))
+        for _ in range(1):
+            self.criaturas.append(CriaturaAmbiental(str(Config.SPRITE_MONSTER5), es_pez=False, es_zigzag=True))
             
         # --- BURBUJAS Y ALGAS ---
         self.burbujas = [[random.randint(10, Config.ANCHO - 10), random.randint(Config.NIVEL_AGUA, Config.ALTO), random.uniform(0.5, 1.5)] for _ in range(12)]
@@ -254,41 +296,46 @@ class ManejadorJuego:
             pygame.draw.circle(surf_b, (200, 240, 255, 60), (r_int + 2, r_int + 2), max(1, r_int - 1))
             self._burbujas_cache[factor] = surf_b
 
-        # --- BOTONES DINÁMICAMENTE CENTRADOS ---
-        btn_w = 340
-        btn_h = 52
+        # BOTONES DINÁMICAMENTE CENTRADOS
+        btn_w = 305
+        btn_h = 50
         cx = (Config.ANCHO - btn_w) // 2
         
-        # --- BOTONES: MENÚ PRINCIPAL ---
+        # BOTONES: MENÚ PRINCIPAL 
         self.btn_jugar = Boton(cx, 260, btn_w, btn_h, "JUGAR", Config.VERDE, Config.VERDE_REMANSO)
         self.btn_opciones = Boton(cx, 325, btn_w, btn_h, "OPCIONES", Config.GRIS, Config.GRIS_CLARO)
         self.btn_instrucciones = Boton(cx, 390, btn_w, btn_h, "INSTRUCCIONES", Config.AMARILLO, Config.VERDE_REMANSO)
-        self.btn_salir = Boton(cx, 455, btn_w, btn_h, "VOLVER AL LAUNCHER", Config.ROJO, Config.ROJO_OSCURO)
+        self.btn_salir = Boton(cx, 455, btn_w, btn_h, "SALIR", Config.ROJO, Config.ROJO_OSCURO)
 
-        # --- BOTÓN: VOLVER DE LA PANTALLA DE INSTRUCCIONES / CRÉDITOS ---
+        # BOTÓN: VOLVER DE LA PANTALLA DE INSTRUCCIONES / CRÉDITOS
         self.btn_instrucciones_volver = Boton(cx, 630, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
         self.btn_creditos_volver = Boton(cx, 630, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
         
-        # --- BOTONES: MENÚ DE SELECCIÓN DE MODOS ---
+        #  BOTONES: MENÚ DE SELECCIÓN DE MODOS 
         self.btn_vs_cpu = Boton(cx, 260, btn_w, btn_h, "VS CPU (1 VS 3)", Config.VERDE, Config.VERDE_REMANSO)
         self.btn_multi = Boton(cx, 330, btn_w, btn_h, "MULTIJUGADOR LOCAL", Config.VERDE, Config.VERDE_REMANSO)
         self.btn_duelo = Boton(cx, 400, btn_w, btn_h, "MODO DUELO (1VS1)", Config.AMARILLO, Config.VERDE_REMANSO)
         self.btn_volver_menu = Boton(cx, 490, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
 
-        # --- BOTONES: SELECCIÓN DE JUGADORES (CANTIDAD) ---
+        #  BOTONES: SELECCIÓN DE MODALIDAD EN MODO DUELO 
+        self.btn_duelo_cpu = Boton(cx, 280, btn_w, btn_h, "1VS1 CPU", Config.VERDE, Config.VERDE_REMANSO)
+        self.btn_duelo_pvp = Boton(cx, 360, btn_w, btn_h, "1VS1 LOCAL", Config.AMARILLO, Config.VERDE_REMANSO)
+        self.btn_duelo_volver = Boton(cx, 450, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
+
+        #  BOTONES: SELECCIÓN DE JUGADORES (CANTIDAD) 
         self.btn_cant_2 = Boton(cx, 260, btn_w, btn_h, "2 JUGADORES", Config.VERDE, Config.VERDE_REMANSO)
         self.btn_cant_3 = Boton(cx, 330, btn_w, btn_h, "3 JUGADORES", Config.VERDE, Config.VERDE_REMANSO)
         self.btn_cant_4 = Boton(cx, 400, btn_w, btn_h, "4 JUGADORES", Config.VERDE, Config.VERDE_REMANSO)
         self.btn_cant_volver = Boton(cx, 490, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
         
-        # --- BOTONES Y SLIDERS: PANTALLA DE OPCIONES ---
+        # BOTONES Y SLIDERS: PANTALLA DE OPCIONES
         self.btn_toggle_musica = Boton(cx, 160, btn_w, btn_h, "MUSICA: SI" if Config.musica_activa else "MUSICA: NO", Config.VERDE, Config.VERDE_REMANSO)
         self.slider_musica = Slider(cx, 250, btn_w, 16, Config.volumen_musica, "VOLUMEN MUSICA")
         self.btn_toggle_sfx = Boton(cx, 325, btn_w, btn_h, "SFX: SI" if Config.sfx_activo else "SFX: NO", Config.VERDE, Config.VERDE_REMANSO)
         self.slider_sfx = Slider(cx, 415, btn_w, 16, Config.volumen_sfx, "VOLUMEN EFECTOS")
         self.btn_volver = Boton(cx, 530, btn_w, btn_h, "VOLVER", Config.GRIS, Config.GRIS_CLARO)
         
-        # --- BOTONES: PAUSA ---
+        # BOTONES: PAUSA
         self.btn_reanudar = Boton(cx, 280, btn_w, btn_h, "REANUDAR", Config.VERDE, Config.VERDE_REMANSO)
         self.btn_pausa_opciones = Boton(cx, 350, btn_w, btn_h, "OPCIONES", Config.GRIS, Config.GRIS_CLARO)
         self.btn_pausa_menu = Boton(cx, 420, btn_w, btn_h, "MENÚ PRINCIPAL", Config.ROJO, Config.ROJO_OSCURO)
@@ -361,38 +408,6 @@ class ManejadorJuego:
 
 
 
-    # --- CARGAR GIF CON PILLOW ---
-    def cargar_gif_animado(self, ruta_gif):
-        try:
-            from PIL import Image
-            img = Image.open(ruta_gif)
-            frames = []
-            try:
-                while True:
-                    frame_rgba = img.convert("RGBA")
-                    data = frame_rgba.tobytes()
-                    surf = pygame.image.fromstring(data, img.size, "RGBA")
-                    surf = pygame.transform.scale(surf, (Config.ANCHO, Config.ALTO))
-                    frames.append(surf)
-                    img.seek(img.tell() + 1)
-            except EOFError:
-                pass
-            print(f"GIF animado {ruta_gif} cargado con éxito: {len(frames)} frames.")
-            return frames
-        except Exception as e:
-            print(f"Error cargando GIF animado {ruta_gif}: {e}")
-            return []
-
-    # --- DELEGADORES DE RENDERIZADO AL RENDERIZADOR (src/renderer.py) ---
-    def dibujar_plataforma_modular(self):
-        self.renderer.dibujar_plataforma_modular(self.sprite_platform, self.sprite_border_texture)
-
-    def dibujar_fondo_marino(self):
-        self.renderer.dibujar_fondo_marino(self.algas_x)
-
-    def dibujar_titulo_animado(self, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110):
-        self.renderer.dibujar_titulo_animado(self.fuente_titulo, self.fuente_subtitulo, texto_titulo, texto_sub, centro_x, base_y)
-
     # --- DELEGADORES DE AUDIO AL GESTOR DE AUDIO (src/audio.py) ---
     def reproducir_sonido(self, sonido, loops=0):
         return self.audio.reproducir_sonido(sonido, loops=loops)
@@ -429,12 +444,28 @@ class ManejadorJuego:
         self.audio.reproducir_sonido_salir()
         self.ejecutando = False
 #--------------------------------------------------------------------------------------------------------------
+    @property
+    def estado(self):
+        return self._estado
+
+    @estado.setter
+    def estado(self, nuevo_estado):
+        self._estado = nuevo_estado
+        if hasattr(self, 'indice_boton_seleccionado'):
+            self.indice_boton_seleccionado = 0
+        if hasattr(self, 'diccionario_estados') and nuevo_estado in self.diccionario_estados:
+            self.estado_obj = self.diccionario_estados[nuevo_estado]
+
+    def cambiar_estado(self, nuevo_estado):
+        """Transiciona limpiamente al nuevo estado utilizando la máquina de estados polimórfica."""
+        self.estado = nuevo_estado
+
     def _pista_para_estado_actual(self):
         """Determina qué pista de música corresponde al estado de juego actual."""
         estados_musica_menu = (
             "PANTALLA_TITULO", "MENU_PRINCIPAL", "MENU_MODOS",
             "MENU_OPCIONES", "INSTRUCCIONES", "MENU_SELECCION_PERSONAJES",
-            "SELECCION_CANTIDAD_JUGADORES",
+            "SELECCION_CANTIDAD_JUGADORES", "SELECCION_MODO_DUELO",
         )
         if self.estado in estados_musica_menu:
             return "menu"
@@ -537,6 +568,7 @@ class ManejadorJuego:
             "MENU_PRINCIPAL": [self.btn_jugar, self.btn_opciones, self.btn_instrucciones, self.btn_salir, self.btn_kamek],
             "MENU_MODOS": [self.btn_vs_cpu, self.btn_multi, self.btn_duelo, self.btn_volver_menu],
             "SELECCION_CANTIDAD_JUGADORES": [self.btn_cant_2, self.btn_cant_3, self.btn_cant_4, self.btn_cant_volver],
+            "SELECCION_MODO_DUELO": [self.btn_duelo_cpu, self.btn_duelo_pvp, self.btn_duelo_volver],
             "MENU_OPCIONES": [self.btn_toggle_musica, self.slider_musica, self.btn_toggle_sfx, self.slider_sfx, self.btn_volver],
             "INSTRUCCIONES": [self.btn_instrucciones_volver],
             "CREDITOS": [self.btn_creditos_volver],
@@ -544,6 +576,45 @@ class ManejadorJuego:
             "FIN_JUEGO": [self.btn_reiniciar, self.btn_fin_menu],
         }
         return mapa.get(self.estado)
+
+    def procesar_tecla_volver(self):
+        """Navega jerárquicamente hacia atrás al menú o estado anterior (tecla ESC/BACKSPACE o botones Volver)."""
+        self.reproducir_sonido(self.snd_click)
+
+        if self.estado == "PANTALLA_TITULO":
+            pass
+        elif self.estado == "MENU_PRINCIPAL":
+            self.salir_del_juego()
+        elif self.estado == "MENU_MODOS":
+            self.cambiar_estado("MENU_PRINCIPAL")
+        elif self.estado == "SELECCION_CANTIDAD_JUGADORES":
+            self.cambiar_estado("MENU_MODOS")
+        elif self.estado == "SELECCION_MODO_DUELO":
+            self.cambiar_estado("MENU_MODOS")
+        elif self.estado == "MENU_SELECCION_PERSONAJES":
+            if self.indice_seleccion_actual > 0:
+                self.indice_seleccion_actual -= 1
+                if self.indice_seleccion_actual in self.personajes_seleccionados:
+                    del self.personajes_seleccionados[self.indice_seleccion_actual]
+            else:
+                prev = getattr(self, "estado_previo_seleccion_personajes", "MENU_MODOS")
+                self.cambiar_estado(prev)
+        elif self.estado == "MENU_OPCIONES":
+            prev = getattr(self, "estado_previo_opciones", "MENU_PRINCIPAL")
+            self.cambiar_estado(prev)
+        elif self.estado == "INSTRUCCIONES":
+            prev = getattr(self, "estado_previo_instrucciones", "MENU_PRINCIPAL")
+            self.cambiar_estado(prev)
+        elif self.estado == "CREDITOS":
+            prev = getattr(self, "estado_previo_creditos", "MENU_PRINCIPAL")
+            self.cambiar_estado(prev)
+        elif self.estado in ("JUGANDO", "EN_JUEGO", "DUELO_ESPECIAL", "REVELANDO_CUERDAS", "ESPERA_POST_SELECCION"):
+            self.estado_previo_a_pausa = self.estado
+            self.cambiar_estado("PAUSA")
+        elif self.estado == "PAUSA":
+            self.cambiar_estado(getattr(self, "estado_previo_a_pausa", "EN_JUEGO"))
+        elif self.estado == "FIN_JUEGO":
+            self.cambiar_estado("MENU_PRINCIPAL")
 
     def procesar_click_menu(self, pos_m):
         """Confirma la opción de un menú de botones en la posición pos_m.
@@ -555,31 +626,28 @@ class ManejadorJuego:
                 if self.snd_kamek:
                     self.reproducir_sonido(self.snd_kamek)
                 self.estado_previo_creditos = "MENU_PRINCIPAL"
-                self.estado = "CREDITOS"
+                self.cambiar_estado("CREDITOS")
             elif self.btn_jugar.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
-                self.estado = "MENU_MODOS"
+                self.cambiar_estado("MENU_MODOS")
             elif self.btn_opciones.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 self.estado_previo_opciones = "MENU_PRINCIPAL"
-                self.estado = "MENU_OPCIONES"
+                self.cambiar_estado("MENU_OPCIONES")
             elif self.btn_instrucciones.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
-                self.estado = "INSTRUCCIONES"
+                self.estado_previo_instrucciones = "MENU_PRINCIPAL"
+                self.cambiar_estado("INSTRUCCIONES")
             elif self.btn_salir.fue_clicado(pos_m):
                 self.salir_del_juego()
 
-
         elif self.estado == "INSTRUCCIONES":
             if self.btn_instrucciones_volver.fue_clicado(pos_m):
-                self.reproducir_sonido(self.snd_click)
-                self.estado = "MENU_PRINCIPAL"
+                self.procesar_tecla_volver()
 
         elif self.estado == "CREDITOS":
             if self.btn_creditos_volver.fue_clicado(pos_m):
-                self.reproducir_sonido(self.snd_click)
-                self.estado = getattr(self, "estado_previo_creditos", "MENU_PRINCIPAL")
-
+                self.procesar_tecla_volver()
 
         elif self.estado == "MENU_MODOS":
             if self.btn_vs_cpu.fue_clicado(pos_m):
@@ -588,11 +656,19 @@ class ManejadorJuego:
                 self.cantidad_humanos = 1
                 self.indice_seleccion_actual = 0
                 self.personajes_seleccionados = {}
-                self.estado = "MENU_SELECCION_PERSONAJES"
+                self.estado_previo_seleccion_personajes = "MENU_MODOS"
+                self.cambiar_estado("MENU_SELECCION_PERSONAJES")
             elif self.btn_multi.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
-                self.estado = "SELECCION_CANTIDAD_JUGADORES"
+                self.cambiar_estado("SELECCION_CANTIDAD_JUGADORES")
             elif self.btn_duelo.fue_clicado(pos_m):
+                self.reproducir_sonido(self.snd_click)
+                self.cambiar_estado("SELECCION_MODO_DUELO")
+            elif self.btn_volver_menu.fue_clicado(pos_m):
+                self.procesar_tecla_volver()
+
+        elif self.estado == "SELECCION_MODO_DUELO":
+            if self.btn_duelo_cpu.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 self.modo_actual = "DUELO"
                 self.cantidad_humanos = 1
@@ -602,10 +678,22 @@ class ManejadorJuego:
                 self.victorias_j2 = 0
                 self.duelo_finalizado = False
                 self.esperando_confirmacion_set = False
-                self.estado = "MENU_SELECCION_PERSONAJES"
-            elif self.btn_volver_menu.fue_clicado(pos_m):
+                self.estado_previo_seleccion_personajes = "SELECCION_MODO_DUELO"
+                self.cambiar_estado("MENU_SELECCION_PERSONAJES")
+            elif self.btn_duelo_pvp.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
-                self.estado = "MENU_PRINCIPAL"
+                self.modo_actual = "DUELO"
+                self.cantidad_humanos = 2
+                self.indice_seleccion_actual = 0
+                self.personajes_seleccionados = {}
+                self.victorias_j1 = 0
+                self.victorias_j2 = 0
+                self.duelo_finalizado = False
+                self.esperando_confirmacion_set = False
+                self.estado_previo_seleccion_personajes = "SELECCION_MODO_DUELO"
+                self.cambiar_estado("MENU_SELECCION_PERSONAJES")
+            elif self.btn_duelo_volver.fue_clicado(pos_m):
+                self.procesar_tecla_volver()
 
         elif self.estado == "SELECCION_CANTIDAD_JUGADORES":
             if self.btn_cant_2.fue_clicado(pos_m):
@@ -614,24 +702,26 @@ class ManejadorJuego:
                 self.modo_actual = "MULTI"
                 self.indice_seleccion_actual = 0
                 self.personajes_seleccionados = {}
-                self.estado = "MENU_SELECCION_PERSONAJES"
+                self.estado_previo_seleccion_personajes = "SELECCION_CANTIDAD_JUGADORES"
+                self.cambiar_estado("MENU_SELECCION_PERSONAJES")
             elif self.btn_cant_3.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 self.cantidad_humanos = 3
                 self.modo_actual = "MULTI"
                 self.indice_seleccion_actual = 0
                 self.personajes_seleccionados = {}
-                self.estado = "MENU_SELECCION_PERSONAJES"
+                self.estado_previo_seleccion_personajes = "SELECCION_CANTIDAD_JUGADORES"
+                self.cambiar_estado("MENU_SELECCION_PERSONAJES")
             elif self.btn_cant_4.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 self.cantidad_humanos = 4
                 self.modo_actual = "MULTI"
                 self.indice_seleccion_actual = 0
                 self.personajes_seleccionados = {}
-                self.estado = "MENU_SELECCION_PERSONAJES"
+                self.estado_previo_seleccion_personajes = "SELECCION_CANTIDAD_JUGADORES"
+                self.cambiar_estado("MENU_SELECCION_PERSONAJES")
             elif self.btn_cant_volver.fue_clicado(pos_m):
-                self.reproducir_sonido(self.snd_click)
-                self.estado = "MENU_MODOS"
+                self.procesar_tecla_volver()
 
         elif self.estado == "MENU_OPCIONES":
             if self.btn_toggle_musica.fue_clicado(pos_m):
@@ -639,7 +729,7 @@ class ManejadorJuego:
                 Config.musica_activa = not Config.musica_activa
                 self.btn_toggle_musica.definir_texto("MUSICA: SI" if Config.musica_activa else "MUSICA: NO")
                 if Config.musica_activa:
-                    self._pista_actual = None  # forzar recarga de la pista correcta
+                    self._pista_actual = None
                     self.reproducir_musica(self._pista_para_estado_actual())
                 else:
                     self.detener_musica()
@@ -648,8 +738,7 @@ class ManejadorJuego:
                 self.reproducir_sonido(self.snd_click)
                 self.btn_toggle_sfx.definir_texto("SFX: SI" if Config.sfx_activo else "SFX: NO")
             elif self.btn_volver.fue_clicado(pos_m):
-                self.reproducir_sonido(self.snd_click)
-                self.estado = self.estado_previo_opciones
+                self.procesar_tecla_volver()
 
         elif self.estado == "PAUSA":
             if self.btn_reanudar.fue_clicado(pos_m):
@@ -662,11 +751,11 @@ class ManejadorJuego:
                     self.tiempo_inicio_sub_estado += delta_pausa
                 elif self.estado_previo_a_pausa == "ESPERA_POST_SELECCION":
                     self.momento_pausa_post_seleccion += delta_pausa
-                self.estado = self.estado_previo_a_pausa
+                self.cambiar_estado(getattr(self, 'estado_previo_a_pausa', 'EN_JUEGO'))
             elif self.btn_pausa_opciones.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 self.estado_previo_opciones = "PAUSA"
-                self.estado = "MENU_OPCIONES"
+                self.cambiar_estado("MENU_OPCIONES")
             elif self.btn_pausa_menu.fue_clicado(pos_m):
                 self.reproducir_sonido(self.snd_click)
                 if self.canal_tension:
@@ -674,7 +763,7 @@ class ManejadorJuego:
                     self.canal_tension = None
                 self.sub_estado_animacion = ""
                 self.revelado = False
-                self.estado = "MENU_PRINCIPAL"
+                self.cambiar_estado("MENU_PRINCIPAL")
 
         elif self.estado == "FIN_JUEGO":
             if self.btn_reiniciar.fue_clicado(pos_m):
@@ -685,15 +774,9 @@ class ManejadorJuego:
                     self.duelo_finalizado = False
                 self.indice_seleccion_actual = 0
                 self.personajes_seleccionados = {}
-                self.estado = "MENU_SELECCION_PERSONAJES"
+                self.cambiar_estado("MENU_SELECCION_PERSONAJES")
             elif self.btn_fin_menu.fue_clicado(pos_m):
-                self.reproducir_sonido(self.snd_click)
-                if self.canal_tension:
-                    self.canal_tension.stop()
-                    self.canal_tension = None
-                self.sub_estado_animacion = ""
-                self.revelado = False
-                self.estado = "MENU_PRINCIPAL"
+                self.procesar_tecla_volver()
 
     def ejecutar(self):
         while self.ejecutando:
@@ -707,6 +790,9 @@ class ManejadorJuego:
         if (self.sub_estado_animacion != "JALANDO" or self.estado == "PAUSA") and self.canal_tension:
             self.canal_tension.stop()
             self.canal_tension = None
+
+        if self.estado in ("PAUSA", "MENU_PRINCIPAL", "MENU_MODOS", "FIN_JUEGO", "MENU_SELECCION_PERSONAJES", "SELECCION_CANTIDAD_JUGADORES", "SELECCION_MODO_DUELO") and self.snd_alerta:
+            self.snd_alerta.stop()
 
         # Al entrar a un menú nuevo, la mano indicadora vuelve a la primera opción
         if self.estado != self._ultimo_estado_menu_check:
@@ -750,6 +836,10 @@ class ManejadorJuego:
             self.btn_cant_3.actualizar(pos_mouse)
             self.btn_cant_4.actualizar(pos_mouse)
             self.btn_cant_volver.actualizar(pos_mouse)
+        elif self.estado == "SELECCION_MODO_DUELO":
+            self.btn_duelo_cpu.actualizar(pos_mouse)
+            self.btn_duelo_pvp.actualizar(pos_mouse)
+            self.btn_duelo_volver.actualizar(pos_mouse)
         elif self.estado == "MENU_SELECCION_PERSONAJES":
             # Resaltar tarjeta de personaje solo si el usuario movió el mouse
             if self.modo_entrada == "MOUSE":
@@ -780,6 +870,9 @@ class ManejadorJuego:
         elif self.estado == "FIN_JUEGO":
             self.btn_reiniciar.actualizar(pos_mouse)
             self.btn_fin_menu.actualizar(pos_mouse)
+
+        if hasattr(self, 'estado_obj') and self.estado_obj:
+            self.estado_obj.actualizar(pos_mouse)
 
         # --- SINCRONIZAR MANO INDICADORA (mouse activo vs navegación por teclado) ---
         grupo_botones = self.obtener_grupo_botones_actual()
@@ -1019,7 +1112,7 @@ class ManejadorJuego:
                     if self.victorias_j1 == 2 or self.victorias_j2 == 2:
                         self.duelo_finalizado = True
                         nombre_g = self.jugadores[0].nombre if self.victorias_j1 == 2 else self.jugadores[1].nombre
-                        self.mensaje_partida = f"GANADOR DEFINITIVO: {nombre_g}!"
+                        self.mensaje_partida = f"¡GANADOR: {nombre_g}!"
                         self.detener_musica()
                         self.reproducir_sonido(snd_fin)
                         self.estado = "FIN_JUEGO"
@@ -1058,6 +1151,7 @@ class ManejadorJuego:
                     self.estado = "FIN_JUEGO"
                 else:
                     self.mensaje_partida = "¡Ronda terminada! Haz clic o presiona una tecla para continuar"
+                    self.reproducir_sonido(self.snd_empate) #Martes 28/07 
 
     def obtener_cuerda_bajo_mouse(self, pos_mouse):
         mejor_idx = None
@@ -1191,41 +1285,7 @@ class ManejadorJuego:
                     self.mostrar_debug_fps = not self.mostrar_debug_fps
 
                 if evento.key == pygame.K_ESCAPE:
-                    if self.estado in ["EN_JUEGO", "REVELANDO_CUERDAS", "ESPERA_POST_SELECCION"]:
-                        self.reproducir_sonido(self.snd_pausa)
-                        if self.canal_tension:
-                            self.canal_tension.stop()
-                            self.canal_tension = None
-                        self.momento_pausa = pygame.time.get_ticks()
-                        self.estado_previo_a_pausa = self.estado
-                        self.estado = "PAUSA"
-                    elif self.estado == "PAUSA":
-                        self.reproducir_sonido(self.snd_reanudar)
-                        ahora = pygame.time.get_ticks()
-                        delta_pausa = ahora - self.momento_pausa
-                        if self.estado_previo_a_pausa == "EN_JUEGO":
-                            self.momento_inicio_turno += delta_pausa
-                        elif self.estado_previo_a_pausa == "REVELANDO_CUERDAS":
-                            self.tiempo_inicio_sub_estado += delta_pausa
-                        elif self.estado_previo_a_pausa == "ESPERA_POST_SELECCION":
-                            self.momento_pausa_post_seleccion += delta_pausa
-                        self.estado = self.estado_previo_a_pausa
-                    elif self.estado == "MENU_OPCIONES":
-                        self.reproducir_sonido(self.snd_click)
-                        self.estado = self.estado_previo_opciones
-                    elif self.estado in ["MENU_MODOS", "SELECCION_CANTIDAD_JUGADORES", "MENU_SELECCION_PERSONAJES", "INSTRUCCIONES", "CREDITOS"]:
-                        self.reproducir_sonido(self.snd_click)
-                        self.estado = "MENU_PRINCIPAL"
-                    elif self.estado == "FIN_JUEGO":
-                        self.reproducir_sonido(self.snd_click)
-                        if self.canal_tension:
-                            self.canal_tension.stop()
-                            self.canal_tension = None
-                        self.sub_estado_animacion = ""
-                        self.revelado = False
-                        self.estado = "MENU_PRINCIPAL"
-                    else:
-                        self.salir_del_juego()
+                    self.procesar_tecla_volver()
                 
                 if self.estado == "MENU_SELECCION_PERSONAJES":
                     chars = Config.PERSONAJES
@@ -1354,8 +1414,26 @@ class ManejadorJuego:
                             if hasattr(elem_actual, 'rect'):
                                 self.procesar_click_menu(elem_actual.rect.center)
 
+#Martes 28/07 Nuevo método añadido para obtener el SFX correspondiente al personaje
+    def obtener_sonido_personaje(self, char_name): 
+        """Devuelve el SFX asociado al personaje seleccionado, si existe."""
+        if not isinstance(self.snd_personaje, list):
+            return None
+        try:
+            indice = Config.PERSONAJES.index(char_name)
+        except ValueError:
+            return None
+        if 0 <= indice < len(self.snd_personaje):
+            return self.snd_personaje[indice]
+        return None
+    
+#Martes 28/07 Se añadió soporte para reproducir el sonido propio de un personaje
     def seleccionar_personaje_activo(self, char_name):
-        self.reproducir_sonido(self.snd_click)
+        sonido_personaje = self.obtener_sonido_personaje(char_name)
+        if sonido_personaje is not None:
+            self.reproducir_sonido(sonido_personaje)
+        else:
+            self.reproducir_sonido(self.snd_click)
         self.personajes_seleccionados[self.indice_seleccion_actual] = char_name
         self.indice_seleccion_actual += 1
         
@@ -1448,139 +1526,92 @@ class ManejadorJuego:
         self.momento_inicio_pensamiento_cpu = 0
         self.reproducir_musica("duel")
     def dibujar_plataforma_modular(self):
-        """Dibuja la plataforma circular/elíptica de 430x175 px con la textura de borde incorporada claramente visible."""
-        if self.sprite_platform:
-            self.pantalla.blit(self.sprite_platform, (Config.SALV_X, Config.SALV_Y))
-            return
-
-        w = Config.SALV_ANCHO
-        h = Config.SALV_ALTO
-        cx = Config.SALV_X + w // 2
-        cy = Config.SALV_Y + h // 2
-        
-        # 1. Base / Borde 3D inferior bajo el agua (Efecto de volumen náutico)
-        profundidad_3d = 14
-        for offset_y in range(profundidad_3d, 0, -2):
-            grosor_color = (130, 20, 20) if offset_y > 6 else (170, 30, 30)
-            pygame.draw.ellipse(self.pantalla, grosor_color, (Config.SALV_X, Config.SALV_Y + offset_y, w, h))
-
-        # 2. Anillo exterior circular sólido (Rojo Mario)
-        rect_ext = pygame.Rect(Config.SALV_X, Config.SALV_Y, w, h)
-        pygame.draw.ellipse(self.pantalla, (215, 40, 40), rect_ext)
-        pygame.draw.ellipse(self.pantalla, Config.NEGRO, rect_ext, width=3)
-
-        # 3. Franja decorativa circular blanca (Salvavidas Mario Party)
-        m_x = 24
-        m_y = 15
-        rect_franja = pygame.Rect(Config.SALV_X + m_x, Config.SALV_Y + m_y, w - m_x * 2, h - m_y * 2)
-        pygame.draw.ellipse(self.pantalla, (245, 245, 245), rect_franja, width=12)
-
-        # 4. Relleno interior uniforme del piso (Tono cálido pulido sin agujeros huecos)
-        p_x = 36
-        p_y = 22
-        rect_piso = pygame.Rect(Config.SALV_X + p_x, Config.SALV_Y + p_y, w - p_x * 2, h - p_y * 2)
-        pygame.draw.ellipse(self.pantalla, (190, 40, 40), rect_piso)
-        pygame.draw.ellipse(self.pantalla, (140, 25, 25), rect_piso, width=2)
-
-        # 5. TEXTURA DE BORDE (border_texture.png): Renderizada AL FINAL sobre el borde frontal para máxima visibilidad
-        if self.sprite_border_texture:
-            b_w = Config.SALV_ANCHO
-            b_h = int(self.sprite_border_texture.get_height() * (b_w / self.sprite_border_texture.get_width()))
-            tex_escalada = pygame.transform.scale(self.sprite_border_texture, (b_w, max(25, b_h)))
-            
-            pos_x = Config.SALV_X
-            pos_y = Config.SALV_Y + (h // 2) - 5
-            self.pantalla.blit(tex_escalada, (pos_x, pos_y))
-            pygame.draw.arc(self.pantalla, Config.NEGRO, (Config.SALV_X, Config.SALV_Y + (h // 2) - 5, b_w, max(25, b_h)), math.pi, 2 * math.pi, 2)
+        self.renderer.dibujar_plataforma_modular(self.sprite_platform, self.sprite_border_texture)
 
     def dibujar_fondo_marino(self):
-        puntos_arena = [(0, Config.ALTO)]
-        for x in range(0, Config.ANCHO + 10, 20):
-            y = Config.ALTO - 45 + int(math.sin(x * 0.015) * 8)
-            puntos_arena.append((x, y))
-        puntos_arena.append((Config.ANCHO, Config.ALTO))
-        pygame.draw.polygon(self.pantalla, (218, 165, 32), puntos_arena)
-        pygame.draw.polygon(self.pantalla, (139, 90, 0), puntos_arena, width=2)
-        
-        for i, ax in enumerate(self.algas_x):
-            tiempo = pygame.time.get_ticks() * 0.0015
-            oscilacion = math.sin(tiempo + i) * 12
-            
-            puntos_alga = []
-            altura_alga = 90 + (i % 3) * 20
-            for paso in range(0, 11):
-                porcentaje = paso / 10
-                y = Config.ALTO - 20 - (altura_alga * porcentaje)
-                desplazamiento = oscilacion * (porcentaje ** 1.5)
-                desplazamiento += math.sin(porcentaje * math.pi) * 8
-                puntos_alga.append((int(ax + desplazamiento), int(y)))
-                
-            for paso in range(len(puntos_alga) - 1):
-                p1 = puntos_alga[paso]
-                p2 = puntos_alga[paso + 1]
-                ancho_linea = int(8 * (1.0 - (paso / len(puntos_alga)) * 0.5))
-                pygame.draw.line(self.pantalla, (34, 139, 34), p1, p2, ancho_linea)
+        self.renderer.dibujar_fondo_marino(self.algas_x)
 
     def dibujar_estela_flotacion_agua(self):
         """Método reservado para efectos de oleaje ambiental."""
         pass
 
-    def dibujar_titulo_animado(self, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110, tamano_titulo=56, tamano_sub=28):
-        if centro_x is None:
-            centro_x = Config.ANCHO // 2
-            
-        t = pygame.time.get_ticks()
-        fuente_grande = pygame.font.Font(Config.FUENTE_PRINCIPAL, tamano_titulo)
-        
-        colores_mp = [
-            (220, 20, 60),    # Rojo
-            (30, 144, 255),   # Azul
-            (34, 139, 34),    # Verde
-            (255, 215, 0),    # Amarillo
-            (138, 43, 226),   # Violeta
-            (255, 140, 0),    # Naranja
-            (0, 255, 255),    # Celeste
-            (255, 105, 180)   # Rosa
-        ]
-        
-        ancho_total = 0
-        surfs_letras = []
-        for i, char in enumerate(texto_titulo):
-            color = colores_mp[i % len(colores_mp)]
-            surf_c = fuente_grande.render(char, True, color)
-            surfs_letras.append((char, surf_c))
-            ancho_total += surf_c.get_width()
-            
-        x_cursor = centro_x - (ancho_total // 2)
-        
-        for i, (char, surf_c) in enumerate(surfs_letras):
-            y_wave = math.sin(t * 0.007 + i * 0.4) * 14
-            pos_y = base_y - 25 + y_wave
-            
-            # Sombra de la letra
-            surf_shadow = fuente_grande.render(char, True, Config.NEGRO)
-            self.pantalla.blit(surf_shadow, (x_cursor + 3, pos_y + 3))
-            # Letra coloreada
-            self.pantalla.blit(surf_c, (x_cursor, pos_y))
-            
-            x_cursor += surf_c.get_width()
-            
-        if texto_sub:
-            fuente_sub = pygame.font.Font(Config.FUENTE_PRINCIPAL, tamano_sub)
-            color_sub = Config.AMARILLO if (t // 300) % 2 == 0 else Config.BLANCO
-            
-            txt_sub = fuente_sub.render(texto_sub, True, color_sub)
-            rect_sub = txt_sub.get_rect(center=(centro_x, base_y + 50))
-            
-            shadow_sub = fuente_sub.render(texto_sub, True, Config.NEGRO)
-            rect_shadow_sub = shadow_sub.get_rect(center=(centro_x + 2, base_y + 52))
-            
-            self.pantalla.blit(shadow_sub, rect_shadow_sub)
-            self.pantalla.blit(txt_sub, rect_sub)
+    def dibujar_titulo_animado(self, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110, tamano_titulo=72, tamano_sub=48):
+        self.renderer.dibujar_titulo_animado(texto_titulo, texto_sub, centro_x, base_y, tamano_titulo, tamano_sub)
+
+    def renderizar_menu_base(self, superficie, pos_mouse):
+        """Renderiza los elementos visuales base de los menús principales."""
+        superficie.blit(self.bg_image_menu, (0, 0))
+        capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
+        capa_oscura.fill((10, 20, 40, 160))
+        superficie.blit(capa_oscura, (0, 0))
+
+        if self.estado == "MENU_PRINCIPAL":
+            self.dibujar_titulo_animado("CHEEP CHEEP CHANCE", "REMAKE", base_y=110, tamano_titulo=72, tamano_sub=48)
+        elif self.estado in ("MENU_MODOS", "SELECCION_CANTIDAD_JUGADORES", "SELECCION_MODO_DUELO"):
+            titulos = {
+                "MENU_MODOS": "SELECCIONA UN MODO",
+                "SELECCION_CANTIDAD_JUGADORES": "¿CUÁNTOS JUGADORES?",
+                "SELECCION_MODO_DUELO": "MODO DUELO (1VS1)"
+            }
+            t_txt = titulos.get(self.estado, "MENÚ")
+            txt_shadow = self.fuente_titulo.render(t_txt, True, Config.NEGRO)
+            superficie.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 123)))
+            txt = self.fuente_titulo.render(t_txt, True, Config.AMARILLO)
+            superficie.blit(txt, txt.get_rect(center=(Config.ANCHO // 2, 120)))
+
+        grupo = self.obtener_grupo_botones_actual()
+        if grupo:
+            for btn in grupo:
+                if isinstance(btn, Boton):
+                    btn.dibujar(superficie)
+
+    def renderizar_opciones(self, superficie, pos_mouse):
+        """Renderiza la pantalla de opciones de sonido."""
+        superficie.blit(self.bg_image_menu, (0, 0))
+        capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
+        capa_oscura.fill((10, 20, 40, 180))
+        superficie.blit(capa_oscura, (0, 0))
+
+        txt_shadow = self.fuente_titulo.render("OPCIONES Y SONIDO", True, Config.NEGRO)
+        superficie.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 123)))
+        txt = self.fuente_titulo.render("OPCIONES Y SONIDO", True, Config.AMARILLO)
+        superficie.blit(txt, txt.get_rect(center=(Config.ANCHO // 2, 120)))
+
+        self.btn_toggle_musica.dibujar(superficie)
+        self.slider_musica.draw(superficie, self.fuente_ui)
+        self.btn_toggle_sfx.dibujar(superficie)
+        self.slider_sfx.draw(superficie, self.fuente_ui)
+        self.btn_volver.dibujar(superficie)
+
+    def renderizar_overlay_pausa(self, superficie):
+        """Renderiza la superposición del menú de pausa sobre la partida."""
+        capa_pausa = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
+        capa_pausa.fill((0, 0, 0, 170))
+        superficie.blit(capa_pausa, (0, 0))
+
+        txt_p_shadow = self.fuente_pausa.render("PAUSA", True, Config.NEGRO)
+        superficie.blit(txt_p_shadow, txt_p_shadow.get_rect(center=(Config.ANCHO // 2 + 3, Config.ALTO // 2 - 120)))
+        txt_p = self.fuente_pausa.render("PAUSA", True, Config.AMARILLO)
+        superficie.blit(txt_p, txt_p.get_rect(center=(Config.ANCHO // 2, Config.ALTO // 2 - 123)))
+
+        self.btn_reanudar.dibujar(superficie)
+        self.btn_pausa_opciones.dibujar(superficie)
+        self.btn_pausa_menu.dibujar(superficie)
 
     def renderizar(self, pos_mouse):
-        self.pantalla.blit(self.bg_image_top, (0, 0))
-        self.pantalla.blit(self.bg_image_bottom, (0, Config.NIVEL_AGUA))
+        """Método de renderizado principal que ejecuta la representación visual del juego."""
+        self.renderizar_pantalla_completa(pos_mouse)
+
+    def renderizar_pantalla_completa(self, pos_mouse):
+        estados_menu = (
+            "MENU_PRINCIPAL", "MENU_MODOS", "SELECCION_CANTIDAD_JUGADORES", "SELECCION_MODO_DUELO",
+            "MENU_SELECCION_PERSONAJES", "MENU_OPCIONES", "INSTRUCCIONES", "CREDITOS"
+        )
+        if self.estado in estados_menu:
+            self.pantalla.blit(self.bg_image_menu, (0, 0))
+        else:
+            self.pantalla.blit(self.bg_image_top, (0, 0))
+            self.pantalla.blit(self.bg_image_bottom, (0, Config.NIVEL_AGUA))
         
         if self.estado == "PANTALLA_TITULO":
             # Dibujar el GIF animado de fondo (si se cargó)
@@ -1653,6 +1684,21 @@ class ManejadorJuego:
             self.btn_cant_3.dibujar(self.pantalla)
             self.btn_cant_4.dibujar(self.pantalla)
             self.btn_cant_volver.dibujar(self.pantalla)
+            
+        elif self.estado == "SELECCION_MODO_DUELO":
+            capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
+            capa_oscura.fill((10, 20, 40, 160))
+            self.pantalla.blit(capa_oscura, (0, 0))
+            
+            txt_shadow = self.fuente_titulo.render("MODO DUELO (1VS1)", True, Config.NEGRO)
+            self.pantalla.blit(txt_shadow, txt_shadow.get_rect(center=(Config.ANCHO // 2 + 3, 123)))
+            txt = self.fuente_titulo.render("MODO DUELO (1VS1)", True, Config.AMARILLO)
+            rect_txt = txt.get_rect(center=(Config.ANCHO // 2, 120))
+            self.pantalla.blit(txt, rect_txt)
+            
+            self.btn_duelo_cpu.dibujar(self.pantalla)
+            self.btn_duelo_pvp.dibujar(self.pantalla)
+            self.btn_duelo_volver.dibujar(self.pantalla)
             
         elif self.estado == "MENU_SELECCION_PERSONAJES":
             capa_oscura = pygame.Surface((Config.ANCHO, Config.ALTO), pygame.SRCALPHA)
@@ -1831,10 +1877,10 @@ class ManejadorJuego:
             self.pantalla.blit(txt, txt.get_rect(center=(Config.ANCHO // 2, 50)))
             
             lineas = [
-                "• Cada jugador elige un personaje y, por turnos, una cuerda.",
-                "• Al final de la ronda se revela el contenido de cada cuerda.",
-                "• ¡Cuidado! Si eliges una cuerda con monstruo, quedas ELIMINADO.",
-                "• Gana la partida el último jugador que quede con vida.",
+                "Cada jugador elige un personaje y, por turnos, una cuerda.",
+                "Al final de la ronda se revela el contenido de cada cuerda.",
+                "¡Cuidado! Si eliges una cuerda con monstruo, quedas ELIMINADO.",
+                "Gana la partida el último jugador que quede con vida.",
             ]
             y_linea = 105
             for linea in lineas:
@@ -1909,31 +1955,30 @@ class ManejadorJuego:
             self.pantalla.blit(txt_materia, txt_materia.get_rect(center=(card_cred.centerx, y_pos)))
 
             y_pos += 38
-            txt_sec = self.fuente_ui.render("Objetos y Abstracción de Datos - Sección 01", True, Config.BLANCO)
+            txt_sec = self.fuente_ui.render("OBJETOS Y ABSTRACCION DE DATOS - SECCION 01", True, Config.BLANCO)
             self.pantalla.blit(txt_sec, txt_sec.get_rect(center=(card_cred.centerx, y_pos)))
 
             y_pos += 55
-            txt_dev_shadow = self.fuente_subtitulo.render("--- DESARROLLADORES (GRUPO #3) ---", True, Config.NEGRO)
+            txt_dev_shadow = self.fuente_subtitulo.render("DESARROLLADORES (GRUPO #3)", True, Config.NEGRO)
             self.pantalla.blit(txt_dev_shadow, txt_dev_shadow.get_rect(center=(card_cred.centerx + 2, y_pos + 2)))
-            txt_dev = self.fuente_subtitulo.render("--- DESARROLLADORES (GRUPO #3) ---", True, Config.AMARILLO)
+            txt_dev = self.fuente_subtitulo.render("DESARROLLADORES (GRUPO #3)", True, Config.AMARILLO)
             self.pantalla.blit(txt_dev, txt_dev.get_rect(center=(card_cred.centerx, y_pos)))
 
             autores = [
-                "• Gibran Sánchez",
-                "• Marcelys Tebres",
-                "• Maximiliano Toro",
-                "• Ricardo Trevison"
+                "GIBRAN SÁNCHEZ",
+                "MARCELYS TEBRES",
+                "MAXIMILIANO TORO",
+                "RICARDO TREVISON"
             ]
             y_pos += 45
             for autor in autores:
                 txt_a = self.fuente_ui.render(autor, True, Config.BLANCO)
                 self.pantalla.blit(txt_a, txt_a.get_rect(center=(card_cred.centerx, y_pos)))
-                y_pos += 32
+                y_pos += 36
 
             self.btn_creditos_volver.dibujar(self.pantalla)
 
-            
-        elif self.estado in ["EN_JUEGO", "PAUSA", "FIN_JUEGO", "REVELANDO_CUERDAS", "ESPERA_POST_SELECCION"]:
+        elif self.estado in ["EN_JUEGO", "PAUSA", "FIN_JUEGO", "REVELANDO_CUERDAS", "ESPERA_POST_SELECCION", "JUGANDO", "DUELO_ESPECIAL"]:
             self.dibujar_plataforma_modular()
             
             self.pantalla.blit(self.tinte_agua, (0, Config.NIVEL_AGUA))
@@ -1957,8 +2002,7 @@ class ManejadorJuego:
                 j.dibujar(self.pantalla)
             
             vivos_iniciales = [j for j in self.jugadores if j.vivo]
-            if self.turno_actual < len(vivos_iniciales) and self.estado == "EN_JUEGO" and not self.revelado:
-                vivos_iniciales[self.turno_actual].dibujar_flecha(self.pantalla)
+
 
             # --- PANEL LATERAL REDISEÑADO PARA 1280x720 ---
             # Ubicado a la izquierda, tono marrón claro/grisáceo, y con alto
@@ -2015,21 +2059,37 @@ class ManejadorJuego:
                 self.pantalla.blit(txt_sel, (panel_x + 15, panel_y + 64 + idx_j * fila_alto))
 
 
-            # --- HUD SUPERIOR: MODO / MARCADOR (TEXTO LIMPIO SIN BURBUJA) ---
+            # --- HUD SUPERIOR: MODO / MARCADOR (TEXTO LIMPIO CON NUMEROS COLOREADOS POR PERSONAJE) ---
             if self.modo_actual == "DUELO":
-                tag = f"DUELO | MARCADOR {self.victorias_j1} - {self.victorias_j2}"
-                if self.muerte_subita_activa: tag += " (M. SÚBITA)"
+                color_j1 = Jugador.COLORES_NOMBRE.get(self.jugadores[0].personaje, Config.BLANCO) if len(self.jugadores) > 0 else Config.AMARILLO
+                color_j2 = Jugador.COLORES_NOMBRE.get(self.jugadores[1].personaje, Config.BLANCO) if len(self.jugadores) > 1 else Config.AMARILLO
+
+                partes_marcador = [
+                    ("DUELO | MARCADOR ", Config.AMARILLO),
+                    (str(self.victorias_j1), color_j1),
+                    (" - ", Config.BLANCO),
+                    (str(self.victorias_j2), color_j2)
+                ]
+                if self.muerte_subita_activa:
+                    partes_marcador.append((" (M. SÚBITA)", Config.ROJO))
+
+                x_cur = 25
+                y_cur = 18
+                for txt_str, col_txt in partes_marcador:
+                    s_shadow = self.fuente_hud_banner.render(txt_str, True, Config.NEGRO)
+                    s_front = self.fuente_hud_banner.render(txt_str, True, col_txt)
+                    self.pantalla.blit(s_shadow, (x_cur + 2, y_cur + 2))
+                    self.pantalla.blit(s_front, (x_cur, y_cur))
+                    x_cur += s_front.get_width()
+                rect_tag = pygame.Rect(25, 18, x_cur - 25, 30)
             else:
                 tag = "MUERTE SÚBITA" if self.muerte_subita_activa else f"RONDA {self.num_ronda}"
-                
-            color_tag = Config.AMARILLO if self.modo_actual == "DUELO" else Config.BLANCO
-            txt_tag_shadow = self.fuente_hud_banner.render(tag, True, Config.NEGRO)
-            txt_tag = self.fuente_hud_banner.render(tag, True, color_tag)
-            
-            rect_tag = txt_tag.get_rect(topleft=(25, 18))
-            rect_tag_shadow = txt_tag_shadow.get_rect(topleft=(27, 20))
-            self.pantalla.blit(txt_tag_shadow, rect_tag_shadow)
-            self.pantalla.blit(txt_tag, rect_tag)
+                txt_tag_shadow = self.fuente_hud_banner.render(tag, True, Config.NEGRO)
+                txt_tag = self.fuente_hud_banner.render(tag, True, Config.BLANCO)
+                rect_tag = txt_tag.get_rect(topleft=(25, 18))
+                rect_tag_shadow = txt_tag_shadow.get_rect(topleft=(27, 20))
+                self.pantalla.blit(txt_tag_shadow, rect_tag_shadow)
+                self.pantalla.blit(txt_tag, rect_tag)
 
             # --- ANUNCIO DE FASES / TURNOS (TEXTO MÁS GRANDE Y MÁS BAJO SIN BURBUJA) ---
             ahora_ms = pygame.time.get_ticks()
@@ -2084,7 +2144,7 @@ class ManejadorJuego:
                 
                 if self.modo_actual == "DUELO":
                     ganador_obj = self.jugadores[0] if self.victorias_j1 == 2 else self.jugadores[1]
-                    texto_final_limpio = f"¡GANADOR DEFINITIVO: {ganador_obj.nombre}!"
+                    texto_final_limpio = f"¡GANADOR: {ganador_obj.nombre}!"
                     color_ganador = Jugador.COLORES_NOMBRE.get(ganador_obj.personaje, Config.AMARILLO)
                 else:
                     ganador_real = [j for j in self.jugadores if j.vivo]
@@ -2137,3 +2197,4 @@ class ManejadorJuego:
             self.pantalla.blit(txt_mute, rect_mute)
 
         pygame.display.flip()
+#Fin

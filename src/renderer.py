@@ -2,19 +2,31 @@ import pygame
 import math
 from src.config import Config
 
+
 class RenderizadorEscenario:
     """
-    Encapsula todas las rutinas de renderizado del escenario 3D:
+    Encapsula todas las rutinas de renderizado del escenario:
     - Plataforma circular/elíptica modular (salvavidas).
     - Fondo marino con ondas de arena y algas animadas.
-    - Título animado del menú principal.
-    - Banner HUD e instrucciones en pantalla.
+    - Título animado tridimensional estilo Mario Party.
+    - Sistema de caché de fuentes para evitar re-instanciaciones a 60 FPS.
     """
     def __init__(self, pantalla):
         self.pantalla = pantalla
+        self._cache_fuentes = {}
+
+    def obtener_fuente(self, tamano):
+        """Retorna una fuente de la memoria caché según su tamaño, instanciándola solo una vez."""
+        if tamano not in self._cache_fuentes:
+            try:
+                self._cache_fuentes[tamano] = pygame.font.Font(Config.FUENTE_PRINCIPAL, tamano)
+            except Exception as e:
+                print(f"Error cargando fuente tamaño {tamano}: {e}")
+                self._cache_fuentes[tamano] = pygame.font.SysFont("arial", tamano, bold=True)
+        return self._cache_fuentes[tamano]
 
     def dibujar_plataforma_modular(self, sprite_platform=None, sprite_border_texture=None):
-        """Dibuja la plataforma circular/elíptica de 430x175 px con la textura de borde incorporada."""
+        """Dibuja la plataforma circular/elíptica con la textura de borde incorporada."""
         if sprite_platform:
             self.pantalla.blit(sprite_platform, (Config.SALV_X, Config.SALV_Y))
             return
@@ -80,30 +92,59 @@ class RenderizadorEscenario:
                 ancho_linea = int(8 * (1.0 - (paso / len(puntos_alga)) * 0.5))
                 pygame.draw.line(self.pantalla, (34, 139, 34), p1, p2, ancho_linea)
 
-    def dibujar_titulo_animado(self, fuente_titulo, fuente_subtitulo, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110):
-        """Renderiza el título tridimensional estilo Mario Party con bamboleo sinusoidal."""
+    def dibujar_titulo_animado(self, texto_titulo="CHEEP CHEEP CHANCE", texto_sub="REMAKE", centro_x=None, base_y=110, tamano_titulo=56, tamano_sub=32):
+        """
+        Renderiza el título tridimensional multicolor con animación de olas por letra estilo Mario Party,
+        utilizando la caché de fuentes optimizada.
+        """
         if centro_x is None:
             centro_x = Config.ANCHO // 2
 
-        tiempo = pygame.time.get_ticks() * 0.003
-        bamboleo_y = math.sin(tiempo) * 5
+        t = pygame.time.get_ticks()
+        fuente_grande = self.obtener_fuente(tamano_titulo)
 
-        # Sombra 3D
-        rect_shadow = fuente_titulo.render(texto_titulo, True, Config.NEGRO).get_rect(center=(centro_x + 4, base_y + 4 + bamboleo_y))
-        self.pantalla.blit(fuente_titulo.render(texto_titulo, True, Config.NEGRO), rect_shadow)
+        colores_mp = [
+            (220, 20, 60),    # Rojo
+            (30, 144, 255),   # Azul
+            (34, 139, 34),    # Verde
+            (255, 215, 0),    # Amarillo
+            (138, 43, 226),   # Violeta
+            (255, 140, 0),    # Naranja
+            (0, 255, 255),    # Celeste
+            (255, 105, 180)   # Rosa
+        ]
 
-        # Borde exterior grueso
-        for dx, dy in [(-2, -2), (-2, 2), (2, -2), (2, 2), (-3, 0), (3, 0), (0, -3), (0, 3)]:
-            r_stroke = fuente_titulo.render(texto_titulo, True, Config.NEGRO).get_rect(center=(centro_x + dx, base_y + dy + bamboleo_y))
-            self.pantalla.blit(fuente_titulo.render(texto_titulo, True, Config.NEGRO), r_stroke)
+        ancho_total = 0
+        surfs_letras = []
+        for i, char in enumerate(texto_titulo):
+            color = colores_mp[i % len(colores_mp)]
+            surf_c = fuente_grande.render(char, True, color)
+            surfs_letras.append((char, surf_c))
+            ancho_total += surf_c.get_width()
 
-        # Texto frontal dorado
-        rect_titulo = fuente_titulo.render(texto_titulo, True, Config.AMARILLO).get_rect(center=(centro_x, base_y + bamboleo_y))
-        self.pantalla.blit(fuente_titulo.render(texto_titulo, True, Config.AMARILLO), rect_titulo)
+        x_cursor = centro_x - (ancho_total // 2)
+
+        for i, (char, surf_c) in enumerate(surfs_letras):
+            y_wave = math.sin(t * 0.007 + i * 0.4) * 14
+            pos_y = base_y - 25 + y_wave
+
+            # Sombra de la letra
+            surf_shadow = fuente_grande.render(char, True, Config.NEGRO)
+            self.pantalla.blit(surf_shadow, (x_cursor + 3, pos_y + 3))
+            # Letra coloreada
+            self.pantalla.blit(surf_c, (x_cursor, pos_y))
+
+            x_cursor += surf_c.get_width()
 
         if texto_sub:
-            y_sub = base_y + 45 + bamboleo_y * 0.5
-            r_sub_shadow = fuente_subtitulo.render(texto_sub, True, Config.NEGRO).get_rect(center=(centro_x + 2, y_sub + 2))
-            self.pantalla.blit(fuente_subtitulo.render(texto_sub, True, Config.NEGRO), r_sub_shadow)
-            r_sub = fuente_subtitulo.render(texto_sub, True, Config.BLANCO).get_rect(center=(centro_x, y_sub))
-            self.pantalla.blit(fuente_subtitulo.render(texto_sub, True, Config.BLANCO), r_sub)
+            fuente_sub = self.obtener_fuente(tamano_sub)
+            color_sub = Config.AMARILLO if (t // 300) % 2 == 0 else Config.BLANCO
+
+            txt_sub = fuente_sub.render(texto_sub, True, color_sub)
+            rect_sub = txt_sub.get_rect(center=(centro_x, base_y + 64))
+
+            shadow_sub = fuente_sub.render(texto_sub, True, Config.NEGRO)
+            rect_shadow_sub = shadow_sub.get_rect(center=(centro_x + 2, base_y + 64))
+
+            self.pantalla.blit(shadow_sub, rect_shadow_sub)
+            self.pantalla.blit(txt_sub, rect_sub)

@@ -1,8 +1,5 @@
 from pathlib import Path
-import os
-import pygame
 
-# Rutas dinámicas obligatorias
 RUTA_RAIZ = Path(__file__).resolve().parent.parent
 RUTA_ASSETS = RUTA_RAIZ / "assets"
 RUTA_IMAGENES = RUTA_ASSETS / "sprites"
@@ -10,12 +7,9 @@ RUTA_FUENTES = RUTA_ASSETS / "fonts"
 RUTA_SONIDOS = RUTA_ASSETS / "sounds"
 
 class Config:
-    # Rutas absolutas expuestas en Config
     RUTA_IMAGENES = RUTA_IMAGENES
     RUTA_FUENTES = RUTA_FUENTES
     RUTA_SONIDOS = RUTA_SONIDOS
-    
-    #Domingo 26/07: Añadí 2 subcarpetas para mayor organización de los archivos de sonido
     RUTA_MUSICA = RUTA_SONIDOS / "music"
     RUTA_SFX = RUTA_SONIDOS / "sfx"
 
@@ -65,10 +59,9 @@ class Config:
     SALV_X = (ANCHO - SALV_ANCHO) // 2 # 415
     SALV_Y = 140
     
-    # NUEVA VARIABLE: Ruta dinámica al archivo .ttf personalizado
     FUENTE_PRINCIPAL = RUTA_FUENTES / "sm256.ttf"
     
-    # Rutas absolutas a los archivos de sprites
+    # Rutas a los archivos de sprites
     SPRITE_ROPE = RUTA_IMAGENES / "sprite_rope.png"
     SPRITE_FISH_LEFT = RUTA_IMAGENES / "sprite_fish_left.png"
     SPRITE_FISH_RIGHT = RUTA_IMAGENES / "sprite_fish_right.png"
@@ -79,9 +72,25 @@ class Config:
     SPRITE_MONSTER2_LEFT = RUTA_IMAGENES / "sprite_monster2_left.png"
     SPRITE_MONSTER2_RIGHT = RUTA_IMAGENES / "sprite_monster2_right.png"
     SPRITE_MONSTER2_FISHED = RUTA_IMAGENES / "sprite_monster2_fished.png"
+    SPRITE_FISH2_LEFT = RUTA_IMAGENES / "sprite_fish2_left.png"
+    SPRITE_FISH2_RIGHT = RUTA_IMAGENES / "sprite_fish2_right.png"
+    SPRITE_FISH2_FISHED = RUTA_IMAGENES / "sprite_fish2_fished.png"
+    SPRITE_FISH3_LEFT = RUTA_IMAGENES / "sprite_fish3_left.png"
+    SPRITE_FISH3_RIGHT = RUTA_IMAGENES / "sprite_fish3_right.png"
+    SPRITE_FISH3_FISHED = RUTA_IMAGENES / "sprite_fish3_fished.png"
+    SPRITE_FISH4_LEFT = RUTA_IMAGENES / "sprite_fish4_left.png"
+    SPRITE_FISH4_RIGHT = RUTA_IMAGENES / "sprite_fish4_right.png"
+    SPRITE_FISH4_FISHED = RUTA_IMAGENES / "sprite_fish4_fished.png"
+    SPRITE_MONSTER3_LEFT = RUTA_IMAGENES / "sprite_monster3_left.png"
+    SPRITE_MONSTER3_RIGHT = RUTA_IMAGENES / "sprite_monster3_right.png"
+    SPRITE_MONSTER3_FISHED = RUTA_IMAGENES / "sprite_monster3_fished.png"
+    SPRITE_MONSTER4_LEFT = RUTA_IMAGENES / "sprite_monster4_left.png"
+    SPRITE_MONSTER4_RIGHT = RUTA_IMAGENES / "sprite_monster4_right.png"
+    SPRITE_MONSTER4_FISHED = RUTA_IMAGENES / "sprite_monster4_fished.png"
+    SPRITE_MONSTER5 = RUTA_IMAGENES / "sprite_monster5.png"
     SPRITE_BACKGROUND_TOP = RUTA_IMAGENES / "sea_background_claro.png"
     SPRITE_BACKGROUND_BOTTOM = RUTA_IMAGENES / "sea_background.png"
-    SPRITE_BACKGROUND = RUTA_IMAGENES / "sea_background.png"
+    SPRITE_BACKGROUND = RUTA_IMAGENES / "menuframe.png"
     SPRITE_PLATFORM = RUTA_IMAGENES / "platform_texture.png"
     SPRITE_BORDER_TEXTURE = RUTA_IMAGENES / "border_texture.png"
 
@@ -95,15 +104,6 @@ class Config:
     sfx_activo = True
 
     # Volumen general (0.0 a 1.0), controlado con los sliders del menú de
-    # opciones. La música arranca más baja que antes para que los efectos
-    # de sonido (SFX) se escuchen bien por encima de ella.
-    volumen_musica = 0.35
-    volumen_sfx = 0.7
-
-
-
-# ==============================================================================
-# COMPONENTE BARRA DESLIZANTE (SLIDER PARA MENÚ OPCIONES)
-# ==============================================================================
-# ==============================================================================
-
+    # opciones.
+    volumen_musica = 0.3
+    volumen_sfx = 0.5

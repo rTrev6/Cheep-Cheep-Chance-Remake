@@ -2,11 +2,25 @@ import pygame
 import math
 from src.config import Config
 
-class Boton:
-    """
-    Componente de botón estilizado Mario Party con soporte de texturas escaladas,
-    hover con ratón y cursor de mano animado para navegación con teclado.
-    """
+
+class ComponenteUI:
+    def __init__(self, x, y, ancho, alto):
+        self.rect = pygame.Rect(x, y, ancho, alto)
+        self.hover = False
+        self.resaltado_teclado = False
+        self.hand_img = None
+
+    def actualizar(self, pos_mouse):
+        self.hover = self.rect.collidepoint(pos_mouse)
+
+    def set_resaltado_teclado(self, valor):
+        self.resaltado_teclado = valor
+
+    def dibujar(self, superficie):
+        raise NotImplementedError("Cada subclase de ComponenteUI debe implementar el método dibujar.")
+
+
+class Boton(ComponenteUI):
     _tex_normal_raw = None
     _tex_selected_raw = None
     _tex_hand_raw = None
@@ -31,15 +45,13 @@ class Boton:
             print(f"Error cargando sprite de mano: {e}")
 
     def __init__(self, x, y, ancho, alto, texto, color_base, color_hover):
-        self.rect = pygame.Rect(x, y, ancho, alto)
+        super().__init__(x, y, ancho, alto)
         self.texto = texto
         self.color_base = color_base
         self.color_hover = color_hover
         self.color_actual = color_base
 
-        self.fuente = pygame.font.Font(Config.FUENTE_PRINCIPAL, 28)
-        self.texto_surf = self.fuente.render(self.texto, True, Config.NEGRO)
-        self.texto_rect = self.texto_surf.get_rect(center=self.rect.center)
+        self._renderizar_texto()
 
         Boton._cargar_texturas()
         self.tex_normal = None
@@ -52,21 +64,34 @@ class Boton:
                 Boton._tex_selected_raw, (ancho + crecimiento, alto + crecimiento)
             )
 
-        self.hover = False
-        self.resaltado_teclado = False
-
-        self.hand_img = None
         if Boton._tex_hand_raw:
             alto_mano = int(alto * 0.85)
             ancho_mano = int(Boton._tex_hand_raw.get_width() * (alto_mano / Boton._tex_hand_raw.get_height()))
             self.hand_img = pygame.transform.scale(Boton._tex_hand_raw, (ancho_mano, alto_mano))
 
-    def actualizar(self, pos_mouse):
-        self.hover = self.rect.collidepoint(pos_mouse)
-        self.color_actual = self.color_hover if self.hover else self.color_base
+    def _renderizar_texto(self):
+        if not self.texto:
+            self.texto_surf = pygame.Surface((0, 0), pygame.SRCALPHA)
+            self.texto_rect = self.texto_surf.get_rect(center=self.rect.center)
+            return
 
-    def set_resaltado_teclado(self, valor):
-        self.resaltado_teclado = valor
+        tamano = 26
+        max_ancho = max(10, self.rect.width - 24)
+        fuente = pygame.font.Font(Config.FUENTE_PRINCIPAL, tamano)
+        surf = fuente.render(self.texto, True, Config.NEGRO)
+
+        while surf.get_width() > max_ancho and tamano > 11:
+            tamano -= 1
+            fuente = pygame.font.Font(Config.FUENTE_PRINCIPAL, tamano)
+            surf = fuente.render(self.texto, True, Config.NEGRO)
+
+        self.fuente = fuente
+        self.texto_surf = surf
+        self.texto_rect = self.texto_surf.get_rect(center=self.rect.center)
+
+    def actualizar(self, pos_mouse):
+        super().actualizar(pos_mouse)
+        self.color_actual = self.color_hover if self.hover else self.color_base
 
     def dibujar(self, superficie):
         seleccionado = self.resaltado_teclado
@@ -92,15 +117,10 @@ class Boton:
 
     def definir_texto(self, nuevo_texto):
         self.texto = nuevo_texto
-        self.texto_surf = self.fuente.render(self.texto, True, Config.NEGRO)
-        self.texto_rect = self.texto_surf.get_rect(center=self.rect.center)
+        self._renderizar_texto()
 
 
-class Slider:
-    """
-    Componente de barra deslizante para ajuste de volumen de Música y SFX
-    con soporte de arrastre de mouse y teclado.
-    """
+class Slider(ComponenteUI):
     _tex_hand_raw = None
     _textura_mano_cargada = False
 
@@ -115,12 +135,10 @@ class Slider:
             print(f"Error cargando sprite de mano en Slider: {e}")
 
     def __init__(self, x, y, w, h, initial_val, label=""):
-        self.rect = pygame.Rect(x, y, w, h)
+        super().__init__(x, y, w, h)
         self.value = initial_val
         self.label = label
         self.dragging = False
-        self.hover = False
-        self.resaltado_teclado = False
         self.handle_width = 16
         self.handle_rect = pygame.Rect(
             x + int(initial_val * w) - self.handle_width // 2, 
@@ -129,8 +147,12 @@ class Slider:
             h + 8
         )
         
+        # Caché de superficie de texto para evitar re-renderizado en cada frame
+        self._last_rendered_value = None
+        self._last_rendered_sel = None
+        self._cached_text_surf = None
+
         Slider._cargar_mano()
-        self.hand_img = None
         if Slider._tex_hand_raw:
             alto_mano = 32
             ancho_mano = int(Slider._tex_hand_raw.get_width() * (alto_mano / Slider._tex_hand_raw.get_height()))
@@ -139,9 +161,6 @@ class Slider:
     def actualizar(self, pos_mouse):
         zona = pygame.Rect(self.rect.x - 10, self.rect.y - 30, self.rect.width + 20, self.rect.height + 40)
         self.hover = zona.collidepoint(pos_mouse)
-
-    def set_resaltado_teclado(self, valor):
-        self.resaltado_teclado = valor
 
     def modificar_valor(self, delta):
         nuevo_val = max(0.0, min(1.0, self.value + delta))
@@ -185,10 +204,15 @@ class Slider:
 
     def draw(self, surface, font):
         seleccionado = self.resaltado_teclado
-        color_texto = Config.AMARILLO if seleccionado else Config.BLANCO
         
-        text_surf = font.render(f"{self.label}: {int(self.value * 100)}%", True, color_texto)
-        surface.blit(text_surf, (self.rect.x, self.rect.y - 25))
+        # Renderizar texto de etiqueta utilizando la caché interna
+        if self._cached_text_surf is None or self._last_rendered_value != self.value or self._last_rendered_sel != seleccionado:
+            color_texto = Config.AMARILLO if seleccionado else Config.BLANCO
+            self._cached_text_surf = font.render(f"{self.label}: {int(self.value * 100)}%", True, color_texto)
+            self._last_rendered_value = self.value
+            self._last_rendered_sel = seleccionado
+
+        surface.blit(self._cached_text_surf, (self.rect.x, self.rect.y - 25))
         
         if seleccionado:
             rect_glow = self.rect.inflate(6, 6)
